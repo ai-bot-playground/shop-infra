@@ -1,0 +1,247 @@
+name: shop
+
+# ---------------------------------------------------------------------------
+# Orkiestracja całego systemu sklepu (flash sale) na lokalnym Dockerze.
+# Ten plik żyje w repo shop-documentation i buduje pozostałe repozytoria
+# wskazując je jako katalogi SIOSTRZANE (../shop-*). Sklonuj wszystkie repo
+# obok siebie do jednego katalogu nadrzędnego (patrz README).
+#
+# Uruchomienie:   docker compose up --build
+# Skalowanie:     docker compose up --scale shop-inwentory=3
+# Czysty restart: docker compose down -v
+# ---------------------------------------------------------------------------
+
+services:
+
+  # ========================= INFRASTRUKTURA =========================
+
+  shop-kafka:
+    image: apache/kafka:4.0.0
+    container_name: shop-kafka
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller       # tryb KRaft - bez Zookeepera
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://shop-kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@shop-kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1     # demo: 1, produkcja: >=3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"      # tematy tworzymy jawnie
+      KAFKA_NUM_PARTITIONS: 6
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+    networks: [backend]
+
+  # Definicje tematów są wersjonowane w repo shop-kafka; tu odtwarzamy je dla dema.
+  shop-kafka-init:
+    image: apache/kafka:4.0.0
+    container_name: shop-kafka-init
+    depends_on:
+      shop-kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        BS=shop-kafka:9092
+        create() { /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --create --if-not-exists --topic "$$1" --partitions "$$2" --replication-factor 1; }
+        create order-events 6
+        create inventory-events 6
+        create payment-events 6
+        create order-events.DLT 1
+        create inventory-events.DLT 1
+        create payment-events.DLT 1
+        echo "=== Utworzone tematy ==="
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server $$BS --list
+    networks: [backend]
+    restart: "no"
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      POSTGRES_DB: appdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Skrypt z repo shop-postgres tworzy bazy per serwis (database-per-service).
+      - ../shop-postgres/01-create-databases.sql:/docker-entrypoint-initdb.d/01-create-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    # Config z repo shop-redis (appendonly + noeviction dla liczników stocku).
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ../shop-redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  kafka-ui:
+    image: kafbat/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8081:8080"
+    depends_on:
+      shop-kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: shop-kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks: [backend]
+
+  # ========================= SERWISY APLIKACYJNE =========================
+  # Bez container_name, by umożliwić skalowanie (--scale shop-xxx=N).
+
+  shop-gateway:
+    build: ../shop-gateway
+    ports:
+      - "8080:8080"            # jedyny publiczny punkt wejścia do backendu
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      CATALOG_SERVICE_URI: http://shop-catalog:8080
+      ORDER_SERVICE_URI: http://shop-order:8080
+      INVENTORY_SERVICE_URI: http://shop-inwentory:8080
+      JWT_ISSUER_URI: http://localhost:8080   # podmień na realnego dostawcę tożsamości
+    networks: [backend]
+
+  shop-catalog:
+    build: ../shop-catalog
+    depends_on:
+      postgres:
+        condition: service_healthy
+      shop-kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/catalog_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    networks: [backend]
+
+  shop-inwentory:
+    build: ../shop-inwentory
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      shop-kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-inwentory
+      RESERVATION_TTL_SECONDS: 600          # auto-zwolnienie rezerwacji po 10 min
+    networks: [backend]
+
+  shop-order:
+    build: ../shop-order
+    depends_on:
+      postgres:
+        condition: service_healthy
+      shop-kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-order
+      SAGA_PAYMENT_TIMEOUT_SECONDS: 30      # brak odpowiedzi -> kompensacja
+    networks: [backend]
+
+  shop-payment:
+    build: ../shop-payment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      shop-kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-payment
+      PAYMENT_FAILURE_RATE: "0.15"          # symulacja odrzuceń -> testowanie kompensacji
+      PAYMENT_LATENCY_MS: "200"
+    networks: [backend]
+
+  shop-notification:
+    build: ../shop-notification
+    depends_on:
+      postgres:
+        condition: service_healthy
+      shop-kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notification_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-notification
+    networks: [backend]
+
+  shop-ui:
+    build: ../shop-ui
+    ports:
+      - "3000:80"              # UI dostępne na http://localhost:3000
+    depends_on:
+      - shop-gateway
+    networks: [backend]
+
+volumes:
+  kafka-data:
+  postgres-data:
+  redis-data:
+
+networks:
+  backend:
+    driver: bridge
