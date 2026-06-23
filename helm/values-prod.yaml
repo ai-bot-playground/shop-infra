@@ -1,0 +1,10 @@
+# prod environment overrides.
+springProfile: prod
+
+# Two replicas per service for in-cluster HA / load spreading.
+services:
+  shop-catalog:   { replicas: 2 }
+  shop-gateway:   { replicas: 2 }
+  shop-order:     { replicas: 2 }
+  shop-inventory: { replicas: 2 }
+  shop-ui:        { replicas: 2 }

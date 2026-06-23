@@ -1,0 +1,13 @@
+{{- range $name, $svc := .Values.services }}
+{{- if eq $svc.type "spring" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  labels:
+    app: {{ $name }}
+data:
+  SPRING_PROFILES_ACTIVE: {{ $.Values.springProfile | quote }}
+{{- end }}
+{{- end }}

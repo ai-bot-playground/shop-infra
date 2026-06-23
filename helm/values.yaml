@@ -1,0 +1,49 @@
+# Default values for the shop umbrella chart.
+# Per-environment overrides live in values-preprod.yaml / values-prod.yaml.
+
+# Spring profile injected into every Spring service via a ConfigMap.
+springProfile: preprod
+
+# Shared resource defaults (override per service via services.<name>.resources).
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    memory: "512Mi"
+
+# Each entry renders a Deployment + Service (+ ConfigMap for type: spring).
+#   type: spring -> actuator probes on /actuator/health + SPRING_PROFILES_ACTIVE ConfigMap
+#   type: web    -> probes on "/" (nginx), no ConfigMap
+services:
+  shop-catalog:
+    image: localhost/shop-catalog:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+  shop-gateway:
+    image: localhost/shop-gateway:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+  shop-order:
+    image: localhost/shop-order:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+  shop-inventory:
+    image: localhost/shop-inventory:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+  shop-ui:
+    image: localhost/shop-ui:0.0.1
+    type: web
+    port: 80
+    replicas: 1
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "32Mi"
+      limits:
+        memory: "128Mi"

@@ -1,0 +1,61 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+spec:
+  replicas: {{ $svc.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: {{ $svc.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ $svc.port }}
+          {{- if eq $svc.type "spring" }}
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}-config
+          {{- end }}
+          resources:
+            {{- toYaml ($svc.resources | default $.Values.resources) | nindent 12 }}
+          {{- if eq $svc.type "spring" }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ $svc.port }}
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ $svc.port }}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ $svc.port }}
+            periodSeconds: 10
+          {{- else }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ $svc.port }}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ $svc.port }}
+            periodSeconds: 10
+          {{- end }}
+{{- end }}

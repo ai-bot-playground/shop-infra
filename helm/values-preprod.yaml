@@ -1,0 +1,10 @@
+# preprod environment overrides.
+springProfile: preprod
+
+# Single replica per service (lean footprint).
+services:
+  shop-catalog:   { replicas: 1 }
+  shop-gateway:   { replicas: 1 }
+  shop-order:     { replicas: 1 }
+  shop-inventory: { replicas: 1 }
+  shop-ui:        { replicas: 1 }
