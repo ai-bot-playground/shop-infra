@@ -43,16 +43,51 @@ $env:TESTCONTAINERS_RYUK_DISABLED = "true"; .\gradlew.bat test
 1. ✅ **ZROBIONE — runtime-green testów komponentowych**: wszystkie 5 serwisów
    `.\gradlew.bat test` przechodzą (uruchomione po włączeniu Docker compatibility).
 
-2. **E2E na preprod** (`shop-acceptance-tests`):
-   - przebuduj obrazy i wdróż na `kind-preprod` (Helm) z włączonym test-support:
-     w values/ConfigMap ustaw `SHOP_TEST_SUPPORT_ENABLED=true` dla **shop-catalog**
-     i **shop-inventory** (potrzebne do provisioningu danych przez testy),
-   - `kubectl --context kind-preprod -n shop port-forward svc/shop-gateway 8080:8080`,
-   - w `shop-acceptance-tests`: `.\run-local.ps1` (happy + out-of-stock; payment-decline
-     działa dzięki produktowi w cenie `x.66`).
+2. ✅ **ZROBIONE — E2E na preprod ZIELONE (3/3 scenariusze, 12/12 kroków)**.
+   Cały stos (Postgres/Redis/Kafka + 6 serwisów) wdrożony w klastrze `kind-preprod`
+   i przetestowany end-to-end przez `shop-acceptance-tests`:
+   - Happy path → `CONFIRMED`, stock 5→3
+   - Out of stock → `REJECTED`, stock bez zmian
+   - Payment declined (kwota `6.66`) → `CANCELLED`, rezerwacja zwolniona
 
-3. **Merge `develop_v_0.0.1` → `main`** per serwis, gdy E2E zielone (na razie nic nie
-   mergowałem do main — zgodnie z bramką jakości).
+   **Runbook (odtworzenie):**
+   ```powershell
+   # 1) build obrazów (multi-stage, gradle w kontenerze)
+   foreach ($s in "shop-gateway","shop-catalog","shop-inventory","shop-order",
+                   "shop-payment","shop-notification","shop-ui") {
+     podman build -t "localhost/$s:0.0.1" "../$s"
+   }
+   # 2) load do klastra (provider podman)
+   $env:KIND_EXPERIMENTAL_PROVIDER="podman"
+   podman save -o imgs.tar localhost/shop-gateway:0.0.1 localhost/shop-catalog:0.0.1 `
+     localhost/shop-inventory:0.0.1 localhost/shop-order:0.0.1 localhost/shop-payment:0.0.1 `
+     localhost/shop-notification:0.0.1 localhost/shop-ui:0.0.1
+   kind load image-archive imgs.tar --name preprod
+   # 3) deploy (in-cluster infra + test-support dla catalog/inventory)
+   helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-namespace `
+     -f ./helm/values.yaml -f ./helm/values-preprod.yaml --timeout 6m
+   # 4) E2E
+   cd ../shop-acceptance-tests; .\run-local.ps1
+   ```
+
+   **Bugi Boot 4 / Spring Cloud 2025.1, które E2E wyłapało (a testy komponentowe nie):**
+   - Kafka: na Boot 4 sam `org.springframework.kafka:spring-kafka` NIE włącza
+     `KafkaAutoConfiguration` → brak `KafkaTemplate`/`@KafkaListener`. Fix:
+     `spring-boot-starter-kafka` (order/payment/inventory/notification). *(maskowane
+     w testach: `outbox.enabled=false`, listenery wołane bezpośrednio).*
+   - Gateway: Spring Cloud Gateway 2025.1 czyta trasy pod
+     `spring.cloud.gateway.server.webflux.routes` (stary `spring.cloud.gateway.routes`
+     ignorowany → 0 tras → 404).
+   - Jackson 3: `HttpCatalogClient` deserializował do Jackson-2 `JsonNode` przez RestClient
+     (Boot 4 = Jackson 3) → `InvalidDefinitionException`. Fix: deserializacja do `Map`.
+     *(maskowane w testach: order używał zaślepki `CatalogClient`).*
+   - Kafka probe: `kafka-broker-api-versions.sh` jako exec-probe forkuje JVM (~3-5s) i
+     przekracza domyślny `timeoutSeconds=1` → crashloop. Fix: `tcpSocket` na 9092.
+   - Scenario data: payment-decline liczył kwotę `6.66×2=13.32` (nie trafiał w hook
+     `cents%100==66`). Fix: zamówienie 1 szt. → kwota `6.66`.
+
+3. **Merge `develop_v_0.0.1` → `main`** per serwis — **teraz odblokowane** (E2E zielone).
+   Nadal Twoja decyzja; nic nie zmergowałem do `main` (bramka jakości).
 
 4. **(później) self-hosted runner** + branch protection na `main`, by E2E był
    wymaganym checkiem PR (workflow `shop-acceptance-tests/.github/workflows/acceptance.yml`
