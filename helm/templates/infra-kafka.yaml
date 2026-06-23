@@ -1,0 +1,128 @@
+{{- if .Values.infra.enabled }}
+{{- $kafka := .Values.infra.kafka }}
+---
+# Single-node Kafka in KRaft mode (no ZooKeeper). Ephemeral storage: fine for a
+# self-contained preprod/prod demo cluster. The controller quorum points at
+# localhost:9093 so the single node bootstraps without needing its own Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-kafka
+  labels:
+    app: shop-kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shop-kafka
+  template:
+    metadata:
+      labels:
+        app: shop-kafka
+    spec:
+      containers:
+        - name: kafka
+          image: {{ $kafka.image }}
+          ports:
+            - containerPort: 9092
+          env:
+            - { name: KAFKA_NODE_ID, value: "1" }
+            - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
+            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://shop-kafka:9092" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1" }
+            - { name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0" }
+            - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false" }
+            - { name: KAFKA_NUM_PARTITIONS, value: "6" }
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx512M -Xms256M" }
+            - { name: CLUSTER_ID, value: {{ $kafka.clusterId | quote }} }
+          # TCP probes only: spawning kafka-broker-api-versions.sh forks a JVM
+          # (~3-5s) which always blows the 1s exec-probe timeout and crash-loops
+          # the broker. A listening 9092 means the broker is unfenced + serving.
+          startupProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop-kafka
+  labels:
+    app: shop-kafka
+spec:
+  type: ClusterIP
+  selector:
+    app: shop-kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+---
+# Topics are created explicitly (auto-create is disabled). Runs as a Helm hook
+# after the broker is applied; the script waits until the broker answers.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shop-kafka-init
+  labels:
+    app: shop-kafka-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: shop-kafka-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          image: {{ $kafka.image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              BS=shop-kafka:9092
+              echo "waiting for broker $BS ...";
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --list >/dev/null 2>&1; do sleep 3; done
+              echo "broker is up, creating topics";
+              {{- range $t := $kafka.topics }}
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --create --if-not-exists --topic {{ $t.name }} --partitions {{ $t.partitions }} --replication-factor 1
+              {{- end }}
+              echo "=== topics ===";
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --list
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              memory: "512Mi"
+{{- end }}
