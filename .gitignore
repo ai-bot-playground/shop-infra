@@ -1,0 +1,2 @@
+# Local-only compose override that exposes backend actuator ports for verification.
+docker-compose.override.yml
