@@ -1,4 +1,4 @@
-# shop-documentation
+# shop-infra
 
 Repozytorium spinające cały system sklepu (scenariusz *flash sale* — ograniczony
 towar, tysiące jednoczesnych kupujących). To **nie jest serwis** — trzyma
@@ -20,7 +20,7 @@ graph LR
     GW["shop-gateway<br/>API Gateway"]
     CAT["shop-catalog"]
     ORD["shop-order<br/>(saga)"]
-    INV["shop-inwentory"]
+    INV["shop-inventory"]
     PAY["shop-payment"]
     NOT["shop-notification"]
     K[["shop-kafka"]]
@@ -54,10 +54,10 @@ System jest w układzie polirepo — każdy serwis to osobne repo GitHub:
 
 | Repo                | Rola                                                    |
 |---------------------|---------------------------------------------------------|
-| `shop-documentation`| dokumentacja, diagramy, `docker-compose.yml`            |
+| `shop-infra`| dokumentacja, diagramy, `docker-compose.yml`            |
 | `shop-gateway`      | API Gateway — publiczny punkt wejścia                   |
 | `shop-catalog`      | katalog produktów (read-heavy)                          |
-| `shop-inwentory`    | magazyn i rezerwacje — serce współbieżności             |
+| `shop-inventory`    | magazyn i rezerwacje — serce współbieżności             |
 | `shop-order`        | zamówienia — orkiestrator sagi                          |
 | `shop-payment`      | płatności (mock z konfigurowalnym odsetkiem odrzuceń)   |
 | `shop-notification` | powiadomienia (e-mail / SMS)                            |
@@ -79,10 +79,10 @@ Sklonuj wszystko obok siebie:
 
 ```
 ai-bot-playground/         <- katalog nadrzędny (workspace)
-├── shop-documentation/    <- tu uruchamiasz `docker compose up`
+├── shop-infra/    <- tu uruchamiasz `docker compose up`
 ├── shop-gateway/
 ├── shop-catalog/
-├── shop-inwentory/
+├── shop-inventory/
 ├── shop-order/
 ├── shop-payment/
 ├── shop-notification/
@@ -95,13 +95,13 @@ ai-bot-playground/         <- katalog nadrzędny (workspace)
 ## Uruchomienie
 
 ```bash
-cd shop-documentation
+cd shop-infra
 docker compose up --build
 ```
 
 `shop-kafka-init` tworzy tematy i kończy działanie (to normalne). Czysty restart
 kasujący dane: `docker compose down -v`. Skalowanie konsumenta:
-`docker compose up --scale shop-inwentory=3`.
+`docker compose up --scale shop-inventory=3`.
 
 ## Mapa portów
 
@@ -114,7 +114,7 @@ kasujący dane: `docker compose down -v`. Skalowanie konsumenta:
 | postgres      | localhost:5432          | bazy (appuser/apppass)                 |
 | redis         | localhost:6379          | licznik stocku, locki, cache           |
 
-Serwisy `shop-catalog/-inwentory/-order/-payment/-notification` nasłuchują na
+Serwisy `shop-catalog/-inventory/-order/-payment/-notification` nasłuchują na
 8080 wewnątrz sieci `backend` i nie są wystawione na hosta — ruch idzie przez `shop-gateway`.
 
 ## Bazy danych (database-per-service)
@@ -126,7 +126,7 @@ osobne instancje.
 | Baza              | Serwis              | Kluczowe tabele                                          |
 |-------------------|---------------------|----------------------------------------------------------|
 | `catalog_db`      | shop-catalog        | `products`, `categories`                                 |
-| `inventory_db`    | shop-inwentory      | `products(total_stock, version)`, `reservations`, `outbox`, `processed_events` |
+| `inventory_db`    | shop-inventory      | `products(total_stock, version)`, `reservations`, `outbox`, `processed_events` |
 | `order_db`        | shop-order          | `orders(idempotency_key UNIQUE)`, `order_items`, `saga_state`, `outbox`, `processed_events` |
 | `payment_db`      | shop-payment        | `payments(idempotency_key UNIQUE)`, `outbox`             |
 | `notification_db` | shop-notification   | `sent_notifications(event_id PK)`                        |
@@ -152,12 +152,12 @@ zobacz [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Przepływ zakupu (saga, orkiestracja przez shop-order)
 
-Ścieżka udana: `POST /orders` → OrderCreated → shop-inwentory rezerwuje (Redis) →
+Ścieżka udana: `POST /orders` → OrderCreated → shop-inventory rezerwuje (Redis) →
 StockReserved → PaymentRequested → shop-payment pobiera → PaymentCompleted →
 OrderConfirmed → shop-notification wysyła potwierdzenie.
 
 Kompensacja (płatność odrzucona): PaymentFailed → shop-order anuluje (CANCELLED)
-+ emituje `ReleaseStock` → shop-inwentory zwalnia rezerwację (stock wraca do
++ emituje `ReleaseStock` → shop-inventory zwalnia rezerwację (stock wraca do
 puli) → shop-notification informuje. Bezpiecznik: rezerwacja w Redis ma TTL, więc
 przy zgubionym zdarzeniu i tak wygasa.
 

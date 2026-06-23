@@ -22,7 +22,7 @@ Kto i co styka się z systemem. W demie zależności zewnętrzne są zamockowane
 graph TB
     buyer(("Kupujący<br/>(przeglądarka)"))
     subgraph sys["System sklepu"]
-        shop["shop-ui · shop-gateway · shop-catalog<br/>shop-order · shop-inwentory<br/>shop-payment · shop-notification<br/>shop-kafka · PostgreSQL · Redis"]
+        shop["shop-ui · shop-gateway · shop-catalog<br/>shop-order · shop-inventory<br/>shop-payment · shop-notification<br/>shop-kafka · PostgreSQL · Redis"]
     end
     psp["Operator płatności<br/>(prod: Stripe / PayU,<br/>demo: mock)"]
     mail["Kanał powiadomień<br/>(prod: SMTP / SMS,<br/>demo: MailHog / log)"]
@@ -51,7 +51,7 @@ graph TB
             GW["shop-gateway<br/>Spring Cloud Gateway · :8080"]
             CAT["shop-catalog · :8080"]
             ORD["shop-order · :8080"]
-            INV["shop-inwentory · :8080"]
+            INV["shop-inventory · :8080"]
             PAY["shop-payment · :8080"]
             NOT["shop-notification · :8080"]
             K[["shop-kafka (KRaft)<br/>:9092 / host :29092"]]
@@ -94,7 +94,7 @@ Kto produkuje, a kto konsumuje poszczególne tematy. Klucz partycji w nawiasie �
 ```mermaid
 graph LR
     ORD["shop-order"]
-    INV["shop-inwentory"]
+    INV["shop-inventory"]
     PAY["shop-payment"]
     NOT["shop-notification"]
 
@@ -140,7 +140,7 @@ sequenceDiagram
     actor U as Kupujący
     participant GW as shop-gateway
     participant ORD as shop-order
-    participant INV as shop-inwentory
+    participant INV as shop-inventory
     participant RD as Redis
     participant PAY as shop-payment
     participant NOT as shop-notification
@@ -174,7 +174,7 @@ Płatność odrzucona (lub timeout sagi) → `shop-order` cofa rezerwację komen
 sequenceDiagram
     autonumber
     participant ORD as shop-order
-    participant INV as shop-inwentory
+    participant INV as shop-inventory
     participant RD as Redis
     participant PAY as shop-payment
     participant NOT as shop-notification

@@ -2,12 +2,12 @@ name: shop
 
 # ---------------------------------------------------------------------------
 # Orkiestracja całego systemu sklepu (flash sale) na lokalnym Dockerze.
-# Ten plik żyje w repo shop-documentation i buduje pozostałe repozytoria
+# Ten plik żyje w repo shop-infra i buduje pozostałe repozytoria
 # wskazując je jako katalogi SIOSTRZANE (../shop-*). Sklonuj wszystkie repo
 # obok siebie do jednego katalogu nadrzędnego (patrz README).
 #
 # Uruchomienie:   docker compose up --build
-# Skalowanie:     docker compose up --scale shop-inwentory=3
+# Skalowanie:     docker compose up --scale shop-inventory=3
 # Czysty restart: docker compose down -v
 # ---------------------------------------------------------------------------
 
@@ -136,7 +136,7 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       CATALOG_SERVICE_URI: http://shop-catalog:8080
       ORDER_SERVICE_URI: http://shop-order:8080
-      INVENTORY_SERVICE_URI: http://shop-inwentory:8080
+      INVENTORY_SERVICE_URI: http://shop-inventory:8080
       JWT_ISSUER_URI: http://localhost:8080   # podmień na realnego dostawcę tożsamości
     networks: [backend]
 
@@ -157,8 +157,8 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
     networks: [backend]
 
-  shop-inwentory:
-    build: ../shop-inwentory
+  shop-inventory:
+    build: ../shop-inventory
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,7 +174,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
-      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-inwentory
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-inventory
       RESERVATION_TTL_SECONDS: 600          # auto-zwolnienie rezerwacji po 10 min
     networks: [backend]
 
