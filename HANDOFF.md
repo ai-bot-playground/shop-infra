@@ -18,9 +18,10 @@ Każdy serwis (poza ui) ma testy **Cucumber + Testcontainers** (Postgres/Redis; 
 weryfikuje dopiero E2E). Stack: Spring Boot 4.0.7 / Java 25 / Gradle 9.6.
 Dodano **wrapper Gradle** do każdego serwisu (`./gradlew` bez instalacji gradle).
 
-> Ważne: zweryfikowałem **kompilację** testów (`gradle testClasses`). Uruchomienie
-> testów (`gradle test`) wymaga Testcontainers ↔ podman, czyli Twojego środowiska —
-> patrz niżej.
+> **Status testów: wszystkie 5 serwisów `gradlew test` przechodzą na ZIELONO**
+> (Testcontainers ↔ podman, Docker compatibility). Po drodze naprawiono dwa realne
+> błędy: Flyway na Boot 4 (potrzebne `spring-boot-starter-flyway` +
+> `flyway-database-postgresql`) oraz escape `/` w wyrażeniach Cucumber (order).
 
 ## Jak uruchomić testy komponentowe lokalnie
 
@@ -39,9 +40,8 @@ $env:TESTCONTAINERS_RYUK_DISABLED = "true"; .\gradlew.bat test
 
 ## ✅ POTRZEBNE OD CIEBIE (lista, którą miałeś sprawdzić po powrocie)
 
-1. **Potwierdzić runtime-green testów komponentowych** — odpal `.\gradlew.bat test`
-   w: `shop-catalog`, `shop-inventory`, `shop-order`, `shop-payment`,
-   `shop-notification` (Testcontainers ↔ podman jw.). Ja potwierdziłem tylko kompilację.
+1. ✅ **ZROBIONE — runtime-green testów komponentowych**: wszystkie 5 serwisów
+   `.\gradlew.bat test` przechodzą (uruchomione po włączeniu Docker compatibility).
 
 2. **E2E na preprod** (`shop-acceptance-tests`):
    - przebuduj obrazy i wdróż na `kind-preprod` (Helm) z włączonym test-support:
