@@ -3,6 +3,9 @@
 How a PR into `main` is gated by a full end-to-end run on the local
 `kind-preprod` cluster, and what you must install once.
 
+> **Daily clean start** of the local infra (podman → kind → runner) so the gate
+> works when you open a PR: see [LOCAL-START.md](LOCAL-START.md).
+
 ## What you install (once) — the only manual step
 
 A **GitHub Actions self-hosted runner**, registered at the **organization**
