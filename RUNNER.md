@@ -79,10 +79,26 @@ Per service repo: **Settings → Branches → Add branch protection rule** for
 (The check name only appears in the list after the first run, so open one PR
 first.) Can also be set via `gh api` once the check has run once.
 
-## Notes / future
+## Status (validated)
 
+- Runner `shop-preprod-1` registered at org level, online.
+- Gate validated end-to-end green on a test PR (build → load → deploy candidate →
+  acceptance, all steps success).
+- Branch protection on `main` **enabled** for all 6 service repos, requiring the
+  `preprod-gate / gate` status check.
+
+## Notes / gotchas / future
+
+- **Gate steps run in PowerShell, not bash.** On a Windows self-hosted runner
+  `shell: bash` resolves to `C:\Windows\System32\bash.exe` (the WSL launcher),
+  which mangles Windows script paths and has no podman/kubectl — every bash step
+  fails with `No such file or directory`. The gate therefore uses
+  `defaults.run.shell: powershell`.
+- Self-hosted runners are blocked for **public** repos by default; we set
+  `allows_public_repositories=true` on the Default runner group. For stronger
+  isolation, make the repos private instead.
 - The `gate.yml` and chart are referenced at `@develop_v_0.0.1`. After you merge
-  the stack to `main`, bump those refs (and the `INFRA_REF`/`ACCEPTANCE_REF` env)
-  to `main`.
+  the stack to `main`, bump those refs (in each `pr-to-main.yml` and the gate's
+  two `actions/checkout` refs) to `main`.
 - `shop-ui` is intentionally not gated by this API suite; add a Playwright gate
   later (spec already in `shop-ui/features/shopping-journey.feature`).
