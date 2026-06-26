@@ -89,6 +89,26 @@ gh pr checks <PR-number> -R ai-bot-playground/<service>
 - [ ] `kubectl --context kind-preprod get nodes` → Ready
 - [ ] runner = online (`gh api .../runners`)
 
+## Token-usage dashboard (Grafana)
+
+The chart deploys with the stack (`observability.enabled=true`): **shop-token-metrics**
+collects LLM token usage (Micrometer → `/actuator/prometheus`), **Prometheus** scrapes it,
+**Grafana** charts it. To view it:
+
+```powershell
+kubectl --context kind-preprod -n shop port-forward svc/grafana 3000:3000
+# open http://localhost:3000  ->  dashboard "LLM Token Usage" (anonymous, no login)
+```
+
+Point the QA tool at the collector so calls are recorded (in `shop-qa-ui/.env`):
+
+```powershell
+kubectl --context kind-preprod -n shop port-forward svc/shop-token-metrics 8088:8080
+# then in shop-qa-ui/.env:  TOKEN_METRICS_URL=http://localhost:8088
+```
+
+Disable the whole observability stack with `--set observability.enabled=false`.
+
 ## Clean shutdown
 
 ```powershell

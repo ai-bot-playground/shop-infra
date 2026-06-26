@@ -128,6 +128,22 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
       SPRING_KAFKA_CONSUMER_GROUP_ID: shop-notification
 
+  # LLM token-usage observability. Receives usage events (POST /api/usage) from
+  # shop-qa-ui and exposes Micrometer counters at /actuator/prometheus, which the
+  # in-cluster Prometheus scrapes (see observability below). No DB/Kafka deps.
+  shop-token-metrics:
+    image: localhost/shop-token-metrics:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+    env: {}
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        memory: "384Mi"
+
   shop-ui:
     image: localhost/shop-ui:0.0.1
     type: web
@@ -139,3 +155,31 @@ services:
         memory: "32Mi"
       limits:
         memory: "128Mi"
+
+# In-cluster observability for LLM token usage: Prometheus scrapes
+# shop-token-metrics /actuator/prometheus, Grafana charts it (dashboard
+# "LLM Token Usage" is provisioned automatically). Disable with
+# observability.enabled=false (e.g. in a managed/cloud environment).
+observability:
+  enabled: true
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    port: 9090
+    scrapeIntervalSeconds: 15
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        memory: "512Mi"
+  grafana:
+    image: grafana/grafana:11.5.0
+    port: 3000
+    # Local demo: anonymous access as Admin so the dashboard opens with no login.
+    adminPassword: admin
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        memory: "512Mi"
