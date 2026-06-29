@@ -89,6 +89,39 @@ gh pr checks <PR-number> -R ai-bot-playground/<service>
 - [ ] `kubectl --context kind-preprod get nodes` → Ready
 - [ ] runner = online (`gh api .../runners`)
 
+## UI services on localhost (port-forward)
+
+Three services are browsed via localhost and are **not** reachable through the
+gateway — open separate port-forwards for each:
+
+| Service | Localhost URL | Notes |
+|---------|--------------|-------|
+| shop-ui | http://localhost:3001 | In-cluster; needs port-forward |
+| shop-token-metrics | http://localhost:8088 | In-cluster; needs port-forward |
+| shop-qa-ui | http://localhost:8501 | NOT in the cluster — runs locally |
+
+Quick start (forwards both in-cluster services in one terminal):
+
+```powershell
+.\port-forward-ui.ps1
+```
+
+Or manually:
+
+```powershell
+kubectl --context kind-preprod -n shop port-forward svc/shop-ui 3001:80
+kubectl --context kind-preprod -n shop port-forward svc/shop-token-metrics 8088:8080
+```
+
+For **shop-qa-ui** start it locally (it connects to the cluster via the above forwards):
+
+```powershell
+cd ..\shop-qa-ui
+.\.venv\Scripts\activate
+$env:TOKEN_METRICS_URL = "http://localhost:8088"
+streamlit run app.py --server.port 8501
+```
+
 ## Token-usage dashboard (Grafana)
 
 The chart deploys with the stack (`observability.enabled=true`): **shop-token-metrics**
