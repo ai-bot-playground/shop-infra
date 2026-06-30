@@ -68,7 +68,7 @@ Files involved:
   token-metrics).
 - `shop-acceptance-tests/.github/workflows/gate.yml` — the reusable gate it calls.
 
-Step by step, for e.g. a PR `shop-order: develop_v_0.0.1 → main`:
+Step by step, for e.g. a PR `shop-order: feature-x → main`:
 
 1. **Trigger.** GitHub reads `pr-to-main.yml` from the PR head branch and sees
    `on: pull_request` (ANY base branch) → a check run **preprod-gate / gate**
@@ -125,8 +125,11 @@ first.) Can also be set via `gh api` once the check has run once.
   could run code on your machine) — GitHub makes you confirm this when adding a
   repo-level runner to a public repo. For stronger isolation, make the repos
   private instead.
-- The `gate.yml` and chart are referenced at `@develop_v_0.0.1`. After you merge
-  the stack to `main`, bump those refs (in each `pr-to-main.yml` and the gate's
-  two `actions/checkout` refs) to `main`.
+- The `gate.yml` and chart are referenced at `@main` — in each service's
+  `pr-to-main.yml` (`uses: ...gate.yml@main`) and the gate's two
+  `actions/checkout` refs (`ref: main` for shop-infra and shop-acceptance-tests).
+  So the gate always builds the candidate service against the **`main`** branch of
+  the chart and the acceptance suite; the apps on kind-preprod are always built
+  from `main`.
 - `shop-ui` is intentionally not gated by this API suite; add a Playwright gate
   later (spec already in `shop-ui/features/shopping-journey.feature`).

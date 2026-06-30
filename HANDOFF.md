@@ -1,7 +1,13 @@
 # Handoff — implementacja v0.0.1 (branch `develop_v_0.0.1`)
 
-Stan po autonomicznej implementacji. Cała praca jest na branchu **`develop_v_0.0.1`**
-w każdym repo (nic nie poszło do `main`).
+> **Aktualizacja (2026-06-30):** stack jest już zmergowany do **`main`** w każdym
+> repo. Bramka CI buduje i wdraża na kind-preprod **zawsze z `main`**: refy
+> `pr-to-main.yml` (`gate.yml@main`) oraz oba `actions/checkout` w `gate.yml`
+> (`ref: main` dla shop-infra i shop-acceptance-tests) wskazują `main`. Poniższy
+> opis to historyczny stan z czasu implementacji v0.0.1.
+
+Stan po autonomicznej implementacji. Cała praca powstała na branchu
+**`develop_v_0.0.1`** w każdym repo (a następnie została zmergowana do `main`).
 
 ## Co zrobione (zaimplementowane + zweryfikowane)
 
