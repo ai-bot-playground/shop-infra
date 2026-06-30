@@ -4,8 +4,9 @@ The PR-to-main gate runs on **this machine** (self-hosted runner) and its
 acceptance tests hit the **live kind-preprod cluster**. So before you open (or
 push to) a PR, start the pieces below **in order**. ~2-3 minutes total.
 
-One-time setup (already done — see [RUNNER.md](RUNNER.md)): runner registered,
-runner group allows public repos, branch protection requires `preprod-gate / gate`.
+One-time setup (see [RUNNER.md](RUNNER.md)): one self-hosted runner registered
+per service repo (name + label = repo name), branch protection requires
+`preprod-gate / gate`.
 
 After a reboot nothing comes up by itself: the podman machine does not autostart,
 and the kind node containers have `restart=no` (they are **stopped**, not deleted).
@@ -54,29 +55,33 @@ kubectl --context kind-preprod -n shop get pods    # all Running
 Pods auto-restart when the node comes back; infra uses ephemeral storage, so data
 resets — that is fine, the acceptance suite provisions its own data each run.
 
-### 4. Start the self-hosted runner
+### 4. Start the self-hosted runners (one per service repo)
 
-Foreground (keep the window open while you work):
+Each gated repo has its own runner in its own folder `C:\actions-runner\<svc>`.
+If you installed them as Windows services they are already running — skip to the
+online check. To run one in the foreground (keep its window open while you work):
 
 ```powershell
-cd C:\actions-runner
+cd C:\actions-runner\shop-catalog
 .\run.cmd                              # waits at "Listening for Jobs"
 ```
 
-(If you later install it as a Windows service it is already running — skip this.)
-
-Confirm it is online on GitHub:
+Confirm every repo's runner is online on GitHub (repo-level runners):
 
 ```powershell
-gh api orgs/ai-bot-playground/actions/runners | ConvertFrom-Json |
-  Select-Object -ExpandProperty runners |
-  ForEach-Object { "$($_.name): $($_.status)" }     # shop-preprod-1: online
+$repos = "shop-gateway","shop-catalog","shop-inventory","shop-order",
+         "shop-payment","shop-notification","shop-token-metrics"
+foreach ($r in $repos) {
+  gh api "repos/ai-bot-playground/$r/actions/runners" | ConvertFrom-Json |
+    Select-Object -ExpandProperty runners |
+    ForEach-Object { "$r -> $($_.name): $($_.status)" }    # e.g. shop-catalog: online
+}
 ```
 
-## Now open / push a PR to main
+## Now open / push a PR
 
-Any PR to `main` (or a new push to an open PR) in a gated service triggers
-`preprod-gate / gate` on your runner:
+Any PR (to any base branch — or a new push to an open PR) in a gated service
+triggers `preprod-gate / gate` on that repo's own runner:
 **component tests → build image → deploy to kind-preprod → acceptance**. Watch it:
 
 ```powershell
@@ -87,7 +92,7 @@ gh pr checks <PR-number> -R ai-bot-playground/<service>
 
 - [ ] podman machine = "Currently running" (Docker compatibility ON)
 - [ ] `kubectl --context kind-preprod get nodes` → Ready
-- [ ] runner = online (`gh api .../runners`)
+- [ ] each gated repo's runner = online (`gh api repos/.../actions/runners`)
 
 ## UI services on localhost (port-forward)
 
