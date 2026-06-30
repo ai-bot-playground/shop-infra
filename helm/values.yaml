@@ -1,8 +1,35 @@
 # Default values for the shop umbrella chart.
 # Per-environment overrides live in values-preprod.yaml / values-prod.yaml.
 
-# Spring profile injected into every Spring service via a ConfigMap.
+# Spring profile injected into every Spring service via its ConfigMap.
 springProfile: preprod
+
+# In-cluster infrastructure (Postgres / Redis / Kafka). For a local kind cluster
+# we run everything in-cluster so the environment is self-contained and cloud
+# agnostic. In a real cloud you would set infra.enabled=false and point the
+# service env at managed endpoints instead.
+infra:
+  enabled: true
+  postgres:
+    image: postgres:17-alpine
+    user: appuser
+    password: apppass
+    # Bootstrap database the server starts with; per-service databases are
+    # created by the init script (database-per-service).
+    db: appdb
+  redis:
+    image: redis:7-alpine
+  kafka:
+    image: apache/kafka:4.0.0
+    clusterId: 5L6g3nShT-eMCtK--X86sw
+    # Topics created by the post-install init Job (auto-create is disabled).
+    topics:
+      - { name: order-events, partitions: 6 }
+      - { name: inventory-events, partitions: 6 }
+      - { name: payment-events, partitions: 6 }
+      - { name: order-events.DLT, partitions: 1 }
+      - { name: inventory-events.DLT, partitions: 1 }
+      - { name: payment-events.DLT, partitions: 1 }
 
 # Shared resource defaults (override per service via services.<name>.resources).
 resources:
@@ -13,29 +40,110 @@ resources:
     memory: "512Mi"
 
 # Each entry renders a Deployment + Service (+ ConfigMap for type: spring).
-#   type: spring -> actuator probes on /actuator/health + SPRING_PROFILES_ACTIVE ConfigMap
+#   type: spring -> actuator probes on /actuator/health, env from ConfigMap
 #   type: web    -> probes on "/" (nginx), no ConfigMap
+#   waitFor      -> host:port deps an initContainer blocks on before the app boots
+#   env          -> rendered into the per-service ConfigMap (envFrom)
 services:
-  shop-catalog:
-    image: localhost/shop-catalog:0.0.1
-    type: spring
-    port: 8080
-    replicas: 1
+
   shop-gateway:
     image: localhost/shop-gateway:0.0.1
     type: spring
     port: 8080
     replicas: 1
-  shop-order:
-    image: localhost/shop-order:0.0.1
+    # Routes default to the in-cluster service DNS names; no extra env needed.
+    env: {}
+
+  shop-catalog:
+    image: localhost/shop-catalog:0.0.1
     type: spring
     port: 8080
     replicas: 1
+    waitFor: ["postgres:5432"]
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/catalog_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SHOP_TEST_SUPPORT_ENABLED: "false"
+
   shop-inventory:
     image: localhost/shop-inventory:0.0.1
     type: spring
     port: 8080
     replicas: 1
+    waitFor: ["postgres:5432", "redis:6379", "shop-kafka:9092"]
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-inventory
+      RESERVATION_TTL_SECONDS: "600"
+      SHOP_TEST_SUPPORT_ENABLED: "false"
+
+  shop-order:
+    image: localhost/shop-order:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+    waitFor: ["postgres:5432", "shop-kafka:9092"]
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-order
+      CATALOG_SERVICE_URI: http://shop-catalog:8080
+      SAGA_PAYMENT_TIMEOUT_SECONDS: "30"
+
+  shop-payment:
+    image: localhost/shop-payment:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+    waitFor: ["postgres:5432", "shop-kafka:9092"]
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-payment
+      # Deterministic for the acceptance gate: random declines disabled, the
+      # payment-decline scenario relies on the x.66 price hook instead.
+      PAYMENT_FAILURE_RATE: "0.0"
+      PAYMENT_LATENCY_MS: "200"
+
+  shop-notification:
+    image: localhost/shop-notification:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+    waitFor: ["postgres:5432", "shop-kafka:9092"]
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/notification_db
+      SPRING_DATASOURCE_USERNAME: appuser
+      SPRING_DATASOURCE_PASSWORD: apppass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: shop-kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: shop-notification
+
+  # LLM token-usage observability. Receives usage events (POST /api/usage) from
+  # shop-qa-ui and exposes Micrometer counters at /actuator/prometheus, which the
+  # in-cluster Prometheus scrapes (see observability below). No DB/Kafka deps.
+  shop-token-metrics:
+    image: localhost/shop-token-metrics:0.0.1
+    type: spring
+    port: 8080
+    replicas: 1
+    env: {}
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        memory: "384Mi"
+
   shop-ui:
     image: localhost/shop-ui:0.0.1
     type: web
@@ -47,3 +155,31 @@ services:
         memory: "32Mi"
       limits:
         memory: "128Mi"
+
+# In-cluster observability for LLM token usage: Prometheus scrapes
+# shop-token-metrics /actuator/prometheus, Grafana charts it (dashboard
+# "LLM Token Usage" is provisioned automatically). Disable with
+# observability.enabled=false (e.g. in a managed/cloud environment).
+observability:
+  enabled: true
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    port: 9090
+    scrapeIntervalSeconds: 15
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        memory: "512Mi"
+  grafana:
+    image: grafana/grafana:11.5.0
+    port: 3000
+    # Local demo: anonymous access as Admin so the dashboard opens with no login.
+    adminPassword: admin
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        memory: "512Mi"

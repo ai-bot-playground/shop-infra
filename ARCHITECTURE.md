@@ -11,6 +11,7 @@ Spis:
 4. [Saga zakupu — ścieżka udana](#4-saga-zakupu--ścieżka-udana)
 5. [Saga zakupu — kompensacja](#5-saga-zakupu--kompensacja)
 6. [Maszyna stanów zamówienia](#6-maszyna-stanów-zamówienia)
+7. [Obserwowalność zużycia tokenów LLM](#7-obserwowalność-zużycia-tokenów-llm)
 
 ---
 
@@ -221,3 +222,36 @@ stateDiagram-v2
         + OrderRejected
     end note
 ```
+
+---
+
+## 7. Obserwowalność zużycia tokenów LLM
+
+Narzędzie **shop-qa-ui** (dev-frontend nad sklepem) woła model LLM (OpenRouter / GLM-5.2).
+Każde wywołanie raportuje zużycie tokenów do dedykowanego serwisu **shop-token-metrics**
+(Spring Boot 4 + Micrometer), który wystawia liczniki na `/actuator/prometheus`. W klastrze
+**Prometheus** je scrapuje, a **Grafana** rysuje dashboard *„LLM Token Usage"*. Stack jest
+opcjonalny (`observability.enabled` w Helm) — w chmurze można go wyłączyć i wpiąć managed
+Prometheus.
+
+```mermaid
+graph LR
+    QA["shop-qa-ui<br/>(Streamlit)"]
+    LLM["OpenRouter<br/>GLM-5.2"]
+    TM["shop-token-metrics<br/>Spring Boot 4 + Micrometer"]
+    PROM["Prometheus<br/>:9090"]
+    GRAF["Grafana<br/>:3000 · dashboard<br/>'LLM Token Usage'"]
+    user(("Użytkownik"))
+
+    QA -->|"chat completions"| LLM
+    LLM -->|"usage: tokens + cost"| QA
+    QA -->|"POST /api/usage"| TM
+    PROM -->|"scrape /actuator/prometheus"| TM
+    GRAF -->|"query"| PROM
+    user -->|":3000"| GRAF
+```
+
+Liczniki (nazwy Prometheusa): `llm_tokens_total{type,model,source}` (prompt / completion /
+reasoning), `llm_requests_total{model,source}`, `llm_cost_usd_total{model,source}`. Tryb
+*thinking* GLM-5.2 jest widoczny jako osobny wymiar `type="reasoning"`. Szczegóły serwisu:
+[`ai-bot-playground/shop-token-metrics`](https://github.com/ai-bot-playground/shop-token-metrics).

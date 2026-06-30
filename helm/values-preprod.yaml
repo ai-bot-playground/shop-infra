@@ -1,10 +1,16 @@
-# preprod environment overrides.
+# preprod environment overrides (deep-merged onto values.yaml).
+# Self-contained: in-cluster Postgres/Redis/Kafka + non-prod test-support
+# endpoints so the acceptance suite can provision and tear down its own data.
 springProfile: preprod
 
-# Single replica per service (lean footprint).
+infra:
+  enabled: true
+
+# Only the deltas vs values.yaml; everything else is inherited by deep merge.
 services:
-  shop-catalog:   { replicas: 1 }
-  shop-gateway:   { replicas: 1 }
-  shop-order:     { replicas: 1 }
-  shop-inventory: { replicas: 1 }
-  shop-ui:        { replicas: 1 }
+  shop-catalog:
+    env:
+      SHOP_TEST_SUPPORT_ENABLED: "true"
+  shop-inventory:
+    env:
+      SHOP_TEST_SUPPORT_ENABLED: "true"

@@ -1,10 +1,18 @@
-# prod environment overrides.
+# prod environment overrides (deep-merged onto values.yaml).
+# test-support stays OFF here (base default false). Infra still runs in-cluster
+# for this local two-cluster demo; a real cloud prod would set infra.enabled=false
+# and point env at managed Postgres/Redis/Kafka.
 springProfile: prod
 
-# Two replicas per service for in-cluster HA / load spreading.
+infra:
+  enabled: true
+
+# Two replicas per stateless service for in-cluster HA / load spreading.
 services:
-  shop-catalog:   { replicas: 2 }
-  shop-gateway:   { replicas: 2 }
-  shop-order:     { replicas: 2 }
-  shop-inventory: { replicas: 2 }
-  shop-ui:        { replicas: 2 }
+  shop-catalog:      { replicas: 2 }
+  shop-gateway:      { replicas: 2 }
+  shop-order:        { replicas: 2 }
+  shop-inventory:    { replicas: 2 }
+  shop-payment:      { replicas: 2 }
+  shop-notification: { replicas: 2 }
+  shop-ui:           { replicas: 2 }
