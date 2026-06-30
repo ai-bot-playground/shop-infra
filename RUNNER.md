@@ -8,49 +8,49 @@ How a PR into `main` is gated by a full end-to-end run on the local
 
 ## What you install (once) — the only manual step
 
-One **GitHub Actions self-hosted runner per service repo**, each registered at
-the **repository** level and **named + labelled after that repo** (so in each
-repo's *Settings → Actions → Runners* you see exactly one runner whose name is
-the repo name). They all run on **this machine, as your own user** (so they share
-your kubeconfig + podman machine + the one local kind-preprod cluster).
+ONE **GitHub Actions self-hosted runner**, registered at the **organization**
+level (`ai-bot-playground`), named **`shop-preprod-1`** and carrying the custom
+label **`shop-preprod`**. Every service gate targets it via
+`runs-on: [self-hosted, shop-preprod]`, so this single shared runner serves all
+gated repos. It runs on **this machine, as your own user** (so it has your
+kubeconfig + podman machine + the one local kind-preprod cluster). Make sure its
+**runner group** is allowed to run on the gated repos listed below.
 
-Gated service repos — one runner each:
+Gated service repos (all routed to the one shared runner):
 `shop-gateway`, `shop-catalog`, `shop-inventory`, `shop-order`, `shop-payment`,
 `shop-notification`, `shop-token-metrics`.
 
-For **each** repo `<svc>` above:
+To register it:
 
-1. GitHub → repo `ai-bot-playground/<svc>` → **Settings → Actions → Runners →
-   New self-hosted runner** → Windows / x64. Copy the `--url` (it will be
-   `https://github.com/ai-bot-playground/<svc>`) and the short-lived `--token`.
-2. In a normal user PowerShell — give each runner its OWN folder so they don't
-   collide:
+1. GitHub → org `ai-bot-playground` → **Settings → Actions → Runners → New runner
+   → New self-hosted runner** → Windows / x64. Copy the `--url` (it will be
+   `https://github.com/ai-bot-playground`) and the short-lived `--token`.
+2. In a normal user PowerShell:
    ```powershell
-   mkdir C:\actions-runner\<svc>; cd C:\actions-runner\<svc>
+   mkdir C:\actions-runner; cd C:\actions-runner
    # download URL is shown on the same GitHub page (actions-runner-win-x64-*.zip)
    Invoke-WebRequest -Uri <RUNNER_ZIP_URL> -OutFile runner.zip
    Expand-Archive runner.zip -DestinationPath .
-   .\config.cmd --url https://github.com/ai-bot-playground/<svc> --token <TOKEN> `
-     --labels <svc> --name <svc> --unattended
+   .\config.cmd --url https://github.com/ai-bot-playground --token <TOKEN> `
+     --labels shop-preprod --name shop-preprod-1 --unattended
    ```
    `self-hosted` and `Windows`/`X64` labels are added automatically; the extra
-   `--labels <svc>` is what the gate targets (`runs-on: [self-hosted, <svc>]`),
-   and `--name <svc>` is what you see in that repo's runner list.
+   `--labels shop-preprod` is what every gate targets
+   (`runs-on: [self-hosted, shop-preprod]`).
 3. Run it (foreground for the first test, then install as a service):
    ```powershell
    .\run.cmd                 # foreground
    # or, to persist across reboots (run elevated once):
    .\svc.cmd install; .\svc.cmd start
    ```
-   > If you install runners as **services**, make sure each service account is
-   > **your user** (not LocalSystem) — otherwise they won't see `~/.kube/config`,
+   > If you install it as a **service**, make sure the service account is
+   > **your user** (not LocalSystem) — otherwise it won't see `~/.kube/config`,
    > the `kind-preprod` context or the podman machine.
 
-> All runners share the one local kind-preprod cluster and the one helm release,
-> so the gate's deploy step takes a machine-local mutex (`Global\shop-preprod-gate`)
-> — only ONE gate touches the cluster at a time, even with a PR open on every repo.
-> (GitHub `concurrency` can't enforce this across repos; its groups are
-> repo-scoped. All runners being on one machine is what makes the mutex work.)
+> The one runner runs a single job at a time, and the gate's deploy step
+> additionally takes a machine-local mutex (`Global\shop-preprod-gate`) — so even
+> with PRs open on several repos, only ONE gate touches the shared kind-preprod
+> cluster / helm release at a time.
 
 ### Runner prerequisites (already true on this machine)
 
@@ -72,13 +72,14 @@ Step by step, for e.g. a PR `shop-order: feature-x → main`:
 
 1. **Trigger.** GitHub reads `pr-to-main.yml` from the PR head branch and sees
    `on: pull_request` (ANY base branch) → a check run **preprod-gate / gate**
-   appears on the PR and is queued onto THIS repo's own
-   `[self-hosted, shop-order]` runner.
+   appears on the PR and is queued onto the shared
+   `[self-hosted, shop-preprod]` runner.
 2. **Serialize.** All repos share one cluster, so the gate's deploy step takes a
    machine-local mutex (`Global\shop-preprod-gate`): only one gate runs load →
    deploy → acceptance at a time; the others block until it releases. (`concurrency:
    preprod-gate` only serializes runs *within* a single repo — GitHub concurrency
-   groups are repo-scoped — so it can't coordinate across the per-repo runners.)
+   groups are repo-scoped — so it can't coordinate across repos; the shared
+   runner + the mutex do.)
 3. **Checkout.** The runner checks out three repos side by side: the PR candidate
    (`shop-order` at the merge result), `shop-infra` (Helm chart) and
    `shop-acceptance-tests` (the suite).
@@ -105,9 +106,10 @@ first.) Can also be set via `gh api` once the check has run once.
 
 ## Status
 
-- Each gated service repo runs its gate on **its own repo-level runner**
-  (`runs-on: [self-hosted, <service>]`). Register one runner per repo as above
-  (name + label = repo name) before opening PRs in that repo.
+- All gated service repos run their gate on **one shared org-level runner**
+  (`shop-preprod-1`, label `shop-preprod`; `runs-on: [self-hosted, shop-preprod]`).
+  Register that single runner as above and grant its runner group access to the
+  gated repos before opening PRs.
 - The gate fires for a PR to **any** base branch and deploys onto the local
   kind-preprod cluster (component tests → build → load → deploy candidate →
   acceptance).
@@ -121,9 +123,9 @@ first.) Can also be set via `gh api` once the check has run once.
   which mangles Windows script paths and has no podman/kubectl — every bash step
   fails with `No such file or directory`. The gate therefore uses
   `defaults.run.shell: powershell`.
-- Self-hosted runners on **public** repos carry a security warning (a fork's PR
-  could run code on your machine) — GitHub makes you confirm this when adding a
-  repo-level runner to a public repo. For stronger isolation, make the repos
+- Self-hosted runners reachable from **public** repos carry a security warning (a
+  fork's PR could run code on your machine) — GitHub makes you confirm this when
+  the org runner is usable by public repos. For stronger isolation, make the repos
   private instead.
 - The `gate.yml` and chart are referenced at `@main` — in each service's
   `pr-to-main.yml` (`uses: ...gate.yml@main`) and the gate's two
