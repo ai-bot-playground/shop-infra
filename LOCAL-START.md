@@ -55,33 +55,34 @@ kubectl --context kind-preprod -n shop get pods    # all Running
 Pods auto-restart when the node comes back; infra uses ephemeral storage, so data
 resets — that is fine, the acceptance suite provisions its own data each run.
 
-### 4. Start the shared self-hosted runner
+### 4. Start the self-hosted runners (one per service repo)
 
-There is ONE org-level runner in `C:\actions-runner` (name `shop-preprod-1`,
-label `shop-preprod`); it serves every gated repo. If you installed it as a
-Windows service it is already running — skip to the online check. To run it in the
-foreground (keep its window open while you work):
+Each gated repo has its own runner in its own folder `C:\actions-runner\<svc>`
+(register them with `shop-infra\register-preprod-runners.ps1`). If you installed
+them as Windows services they are already running — skip to the online check. To
+run them in the foreground, from `shop-infra`:
 
 ```powershell
-cd C:\actions-runner
-.\run.cmd                              # waits at "Listening for Jobs"
+.\register-preprod-runners.ps1 -Start    # one runner window per repo
+# or per repo:  cd C:\actions-runner\shop-catalog; .\run.cmd
 ```
 
-Confirm the runner is up:
+Confirm every repo's runner is online on GitHub (repo-level runners):
 
 ```powershell
-# Local: the listener process should be running
-Get-Process Runner.Listener -ErrorAction SilentlyContinue
-# GitHub: org Settings -> Actions -> Runners -> shop-preprod-1 = Idle/Active
-#   (it also shows on each repo's Runners page as "Shared with this repository").
-#   Via API needs the admin:org scope: gh auth refresh -h github.com -s admin:org
-#   gh api orgs/ai-bot-playground/actions/runners
+$repos = "shop-gateway","shop-catalog","shop-inventory","shop-order",
+         "shop-payment","shop-notification","shop-token-metrics"
+foreach ($r in $repos) {
+  gh api "repos/ai-bot-playground/$r/actions/runners" | ConvertFrom-Json |
+    Select-Object -ExpandProperty runners |
+    ForEach-Object { "$r -> $($_.name): $($_.status)" }    # e.g. shop-catalog: online
+}
 ```
 
 ## Now open / push a PR
 
 Any PR (to any base branch — or a new push to an open PR) in a gated service
-triggers `preprod-gate / gate` on the shared `shop-preprod` runner:
+triggers `preprod-gate / gate` on that repo's own runner:
 **component tests → build image → deploy to kind-preprod → acceptance**. Watch it:
 
 ```powershell
@@ -92,7 +93,7 @@ gh pr checks <PR-number> -R ai-bot-playground/<service>
 
 - [ ] podman machine = "Currently running" (Docker compatibility ON)
 - [ ] `kubectl --context kind-preprod get nodes` → Ready
-- [ ] shared `shop-preprod` runner = online (`Get-Process Runner.Listener`; org Runners page)
+- [ ] each gated repo's runner = online (`gh api repos/.../actions/runners`)
 
 ## UI services on localhost (port-forward)
 
