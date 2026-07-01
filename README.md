@@ -46,11 +46,56 @@ $env:OPENROUTER_API_KEY = "sk-or-..."
 podman compose up -d
 ```
 
-Czysty restart (usuwa wolumeny z danymi): `podman compose down -v && podman compose up --build`.
+Zatrzymanie:
+
+```powershell
+podman compose stop      # zatrzymuje kontenery, zachowuje dane
+podman compose down      # zatrzymuje i usuwa kontenery (dane w wolumenach nienaruszone)
+podman compose down -v   # zatrzymuje + usuwa kontenery i wolumeny (czyste środowisko)
+```
 
 Skalowanie: `podman compose up --scale shop-inventory=3`.
 
 Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch publiczny idzie przez `shop-gateway`.
+
+
+## Preprod (kind) i bramka CI
+
+PR do `main` jest bramkowany pełnym E2E na lokalnym klastrze `kind-preprod`. Gate działa na maszynie dewelopera. Kolejność startu: **podman → kind → runner**.
+
+```powershell
+# 1) podman machine (Docker compatibility ON — wymagane przez Testcontainers)
+podman machine start
+
+# 2) klaster kind
+$env:KIND_EXPERIMENTAL_PROVIDER = "podman"
+podman start preprod-control-plane
+kubectl --context kind-preprod get nodes        # STATUS = Ready
+
+# 3) deploy stacku (Helm)
+helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-namespace `
+  -f ./helm/values.yaml -f ./helm/values-preprod.yaml --timeout 6m
+
+# 4) runnery (jeden per repo serwisowe)
+.\register-preprod-runners.ps1 -Start
+```
+
+
+Skrypty pomocnicze: `deploy-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
+
+
+### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
+
+Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-preprod.ps1`.
+
+```powershell
+# undeploy aplikacji
+helm uninstall shop --kube-context kind-preprod -n shop
+
+# zatrzymaj kontener kind (podman i podman compose dalej działają)
+podman stop preprod-control-plane
+```
+
 
 ### Mapa portów
 
@@ -166,44 +211,6 @@ cd shop-catalog    # lub dowolny serwis
 # Jeśli Ryuk sprawia problemy:
 $env:TESTCONTAINERS_RYUK_DISABLED = "true"; .\gradlew.bat test
 ```
-
-## Preprod (kind) i bramka CI
-
-PR do `main` jest bramkowany pełnym E2E na lokalnym klastrze `kind-preprod`. Gate działa na maszynie dewelopera. Kolejność startu: **podman → kind → runner**.
-
-```powershell
-# 1) podman machine (Docker compatibility ON — wymagane przez Testcontainers)
-podman machine start
-
-# 2) klaster kind
-$env:KIND_EXPERIMENTAL_PROVIDER = "podman"
-podman start preprod-control-plane
-kubectl --context kind-preprod get nodes        # STATUS = Ready
-
-# 3) deploy stacku (Helm)
-helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-namespace `
-  -f ./helm/values.yaml -f ./helm/values-preprod.yaml --timeout 6m
-
-# 4) runnery (jeden per repo serwisowe)
-.\register-preprod-runners.ps1 -Start
-```
-
-
-Skrypty pomocnicze: `deploy-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
-
-
-### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
-
-Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-preprod.ps1`.
-
-```powershell
-# undeploy aplikacji
-helm uninstall shop --kube-context kind-preprod -n shop
-
-# zatrzymaj kontener kind (podman i podman compose dalej działają)
-podman stop preprod-control-plane
-```
-
 
 **Jak działa gate (serwisy Java):** `pr-to-main.yml` (`on: pull_request`) → check `preprod-gate / gate` na runnerze `[self-hosted, <svc>]`. Mutex `Global\shop-preprod-gate` serializuje równoległe PR. Checkout 3 repo (kandydat, `shop-infra`, `shop-acceptance-tests`) → `gradlew test` → `podman build` → `kind load` → `helm upgrade` z `--set-string services.<svc>.image` + `rollout status` → port-forward + `./gradlew test` (acceptance). Zielone = PR odblokowany.
 
