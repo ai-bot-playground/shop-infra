@@ -196,11 +196,13 @@ if (-not $SkipQaUi) { kubectl --context $ctx -n 'shop-qa-ui' get pods }
 # --- port-forward UI services (new window if not already listening) ----------
 $pf3001 = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue
 $pf8088 = Get-NetTCPConnection -LocalPort 8088 -State Listen -ErrorAction SilentlyContinue
-if (-not $pf3001 -or -not $pf8088) {
-  Log "PORT-FORWARD: starting in new window (shop-ui :3001, shop-token-metrics :8088)"
+$pf8501 = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue
+$pf3002 = Get-NetTCPConnection -LocalPort 3002 -State Listen -ErrorAction SilentlyContinue
+if (-not $pf3001 -or -not $pf8088 -or -not $pf8501 -or -not $pf3002) {
+  Log "PORT-FORWARD: starting in new window (shop-ui :3001, shop-token-metrics :8088, shop-qa-ui :8501, grafana :3002)"
   Start-Process powershell -ArgumentList '-NoExit','-File',(Join-Path $infra 'port-forward-ui.ps1')
 } else {
-  Log "PORT-FORWARD: already listening on 3001 + 8088"
+  Log "PORT-FORWARD: already listening on 3001 + 8088 + 8501 + 3002"
 }
 
 # --- optional: acceptance E2E suite against the deployed stack ---------------
