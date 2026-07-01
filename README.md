@@ -60,7 +60,7 @@ Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch pu
 | shop-ui | <http://localhost:3001> | kind-preprod (port-forward-ui.ps1) |
 | kafka-ui | <http://localhost:8081> | podman compose |
 | shop-qa-ui | <http://localhost:8501> | lokalnie (`streamlit run app.py`) |
-| Grafana — LLM token dashboard | <http://localhost:3000> | kind-preprod (`kubectl port-forward svc/grafana 3000:3000`) |
+| Grafana — LLM token dashboard | <http://localhost:3002> | kind-preprod (`kubectl port-forward svc/grafana 3002:3000`) |
 
 ## Architektura
 

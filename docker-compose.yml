@@ -257,14 +257,12 @@ services:
     depends_on:
       shop-token-metrics:
         condition: service_healthy
+    env_file:
+      - ../shop-qa-ui/.env.docker   # OPENROUTER_API_KEY + model config
     environment:
-      OPENROUTER_MODEL: "z-ai/glm-5.2"
-      OPENROUTER_REASONING_EFFORT: "high"
-      OPENROUTER_MAX_TOKENS: "32000"
       TOKEN_METRICS_URL: http://shop-token-metrics:8080
       TOKEN_METRICS_SOURCE: shop-qa-ui
       SHOP_REPOS_DIR: /repos
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     volumes:
       - ..:/repos:ro            # montuje katalog ai-bot-playground z wszystkimi repozytoriami
     networks: [backend]
