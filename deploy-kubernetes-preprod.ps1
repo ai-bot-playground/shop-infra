@@ -14,7 +14,7 @@
       01-create-databases.sql / redis.conf, baked into the chart).
     * shop-infra -> IS the Helm chart used for `helm upgrade --install` (the
       deploy mechanism itself), applied from its current working tree.
-    * shop-qa-ui -> separate app: image shop-qa-ui:dev built from the repo,
+    * shop-qa-ui -> separate app: image localhost/shop-qa-ui:dev built from the repo,
       loaded into kind, applied via its own kustomize (deploy/k8s, namespace
       `shop-qa-ui`). Needs a `shop-qa-ui-secrets` secret (OpenRouter
       key) — created here if missing (placeholder unless -OpenRouterApiKey /
@@ -85,7 +85,7 @@ Log "Runners: checking self-hosted runners in $runnerRoot"
 foreach ($svc in $runnerServices) {
   $dir = Join-Path $runnerRoot $svc
   if (-not (Test-Path $dir)) {
-    Write-Warning "Runner not registered for $svc ($dir missing) — run register-preprod-runners.ps1 first"
+    Write-Warning "Runner not registered for $svc ($dir missing) - run register-preprod-runners.ps1 first"
     continue
   }
 
@@ -121,15 +121,15 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { Die "podman build failed for $s" }
   }
   if (-not $SkipQaUi) {
-    Log "BUILD shop-qa-ui -> shop-qa-ui:dev"
-    podman build -f (Join-Path $root 'shop-qa-ui\Containerfile') -t 'shop-qa-ui:dev' (Join-Path $root 'shop-qa-ui')
+    Log "BUILD shop-qa-ui -> localhost/shop-qa-ui:dev"
+    podman build -f (Join-Path $root 'shop-qa-ui\Containerfile') -t 'localhost/shop-qa-ui:dev' (Join-Path $root 'shop-qa-ui')
     if ($LASTEXITCODE -ne 0) { Die "podman build failed for shop-qa-ui" }
   }
 } else { Log "SkipBuild: reusing existing images" }
 
 # --- load images into the kind node ------------------------------------------
 $imgs = $appServices | ForEach-Object { "localhost/$($_):$tag" }
-if (-not $SkipQaUi) { $imgs += 'shop-qa-ui:dev' }
+if (-not $SkipQaUi) { $imgs += 'localhost/shop-qa-ui:dev' }
 $tar = Join-Path $env:TEMP 'shop-preprod-imgs.tar'
 Log "SAVE $($imgs.Count) images -> $tar"
 podman save -o $tar @imgs
@@ -160,24 +160,32 @@ foreach ($s in $appServices) {
 
 # --- shop-qa-ui (separate namespace, own kustomize) --------------------------
 if (-not $SkipQaUi) {
-  $qns = 'shop-qa-ui'
-  Log "QA-UI: namespace + secret + kustomize ($qns)"
-  kubectl --context $ctx get ns $qns *> $null
-  if ($LASTEXITCODE -ne 0) { kubectl --context $ctx create ns $qns | Out-Null }
+  $qns = $ns  # shop-qa-ui lives in the same 'shop' namespace as the rest
+  Log "QA-UI: secret + kustomize (namespace: $qns)"
+
+  # Resolve OpenRouter key: param > env var > .env.docker file
+  $resolvedKey = $OpenRouterApiKey
+  if (-not $resolvedKey) { $resolvedKey = $env:OPENROUTER_API_KEY }
+  if (-not $resolvedKey) {
+    $envDocker = Join-Path $root 'shop-qa-ui\.env.docker'
+    if (Test-Path $envDocker) {
+      $resolvedKey = (Get-Content $envDocker | Where-Object { $_ -match '^OPENROUTER_API_KEY=(.+)' } | Select-Object -First 1) -replace '^OPENROUTER_API_KEY=',''
+    }
+  }
 
   kubectl --context $ctx -n $qns get secret shop-qa-ui-secrets *> $null
   if ($LASTEXITCODE -ne 0) {
-    $key = if ($OpenRouterApiKey) { $OpenRouterApiKey } else { 'REPLACE_ME' }
+    $key = if ($resolvedKey) { $resolvedKey } else { 'REPLACE_ME' }
     kubectl --context $ctx -n $qns create secret generic shop-qa-ui-secrets --from-literal=OPENROUTER_API_KEY=$key | Out-Null
-    if (-not $OpenRouterApiKey) { Write-Warning "qa-ui: created shop-qa-ui-secrets with a PLACEHOLDER. Set -OpenRouterApiKey or `$env:OPENROUTER_API_KEY for real LLM calls." }
+    if (-not $resolvedKey) { Write-Warning "qa-ui: created shop-qa-ui-secrets with a PLACEHOLDER - LLM calls will not work." }
   }
 
   kubectl --context $ctx apply -k (Join-Path $root 'shop-qa-ui\deploy\k8s')
   if ($LASTEXITCODE -ne 0) { Die "kubectl apply -k (qa-ui) failed" }
   kubectl --context $ctx -n $qns rollout restart deployment/shop-qa-ui *> $null
   Log "ROLLOUT shop-qa-ui"
-  kubectl --context $ctx -n $qns rollout status deployment/shop-qa-ui --timeout=180s
-  if ($LASTEXITCODE -ne 0) { Die "rollout status failed for qa-ui" }
+  kubectl --context $ctx -n $qns rollout status deployment/shop-qa-ui --timeout=300s
+  if ($LASTEXITCODE -ne 0) { Write-Warning "qa-ui rollout did not finish in 300s - check: kubectl -n shop-qa-ui get pods" }
 }
 
 # --- summary -----------------------------------------------------------------

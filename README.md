@@ -59,6 +59,20 @@ Skalowanie: `podman compose up --scale shop-inventory=3`.
 Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch publiczny idzie przez `shop-gateway`.
 
 
+### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
+
+Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-kubernetes-preprod.ps1` (prefiks `.\` wymagany przez PowerShell).
+
+```powershell
+# undeploy aplikacji
+helm uninstall shop --kube-context kind-preprod -n shop
+
+# zatrzymaj kontener kind (podman i podman compose dalej działają)
+podman stop preprod-control-plane
+```
+
+
+
 ## Preprod (kind) i bramka CI
 
 PR do `main` jest bramkowany pełnym E2E na lokalnym klastrze `kind-preprod`. Gate działa na maszynie dewelopera. Kolejność startu: **podman → kind → runner**.
@@ -82,20 +96,6 @@ helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-
 
 
 Skrypty pomocnicze: `deploy-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
-
-
-### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
-
-Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-preprod.ps1`.
-
-```powershell
-# undeploy aplikacji
-helm uninstall shop --kube-context kind-preprod -n shop
-
-# zatrzymaj kontener kind (podman i podman compose dalej działają)
-podman stop preprod-control-plane
-```
-
 
 ### Mapa portów
 
