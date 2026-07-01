@@ -26,14 +26,29 @@ Wszystkie repozytoria klonuj jako **siostrzane katalogi** w `ai-bot-playground/`
 
 **Stack serwisów:** Spring Boot 4.0.7 / Java 25 / Gradle 9.6. Każdy serwis (poza `shop-ui`) ma testy Cucumber + Testcontainers.
 
-## Uruchomienie lokalne (docker compose)
+## Uruchomienie lokalne (podman compose)
 
-```bash
+Wymaga: Podman Desktop lub Docker Desktop z włączoną „Docker compatibility".
+
+```powershell
+# pierwsze uruchomienie lub po zmianie kodu
 cd shop-infra
-docker compose up --build
+podman compose up --build
+
+# kolejne starty (bez przebudowy)
+podman compose up -d
 ```
 
-Czysty restart: `docker compose down -v`. Skalowanie: `docker compose up --scale shop-inventory=3`.
+Klucz OpenRouter (wymagany przez `shop-qa-ui`):
+
+```powershell
+$env:OPENROUTER_API_KEY = "sk-or-..."
+podman compose up -d
+```
+
+Czysty restart (usuwa wolumeny z danymi): `podman compose down -v && podman compose up --build`.
+
+Skalowanie: `podman compose up --scale shop-inventory=3`.
 
 Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch publiczny idzie przez `shop-gateway`.
 
@@ -41,9 +56,9 @@ Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch pu
 
 | Element | URL | Środowisko |
 |---|---|---|
-| shop-ui | <http://localhost:3000> | docker compose |
+| shop-ui | <http://localhost:3000> | podman compose |
 | shop-ui | <http://localhost:3001> | kind-preprod (port-forward-ui.ps1) |
-| kafka-ui | <http://localhost:8081> | docker compose |
+| kafka-ui | <http://localhost:8081> | podman compose |
 | shop-qa-ui | <http://localhost:8501> | lokalnie (`streamlit run app.py`) |
 | Grafana — LLM token dashboard | <http://localhost:3000> | kind-preprod (`kubectl port-forward svc/grafana 3000:3000`) |
 
@@ -185,7 +200,7 @@ Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy
 # undeploy aplikacji
 helm uninstall shop --kube-context kind-preprod -n shop
 
-# zatrzymaj kontener kind (podman i docker compose dalej działają)
+# zatrzymaj kontener kind (podman i podman compose dalej działają)
 podman stop preprod-control-plane
 ```
 

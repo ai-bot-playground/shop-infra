@@ -237,6 +237,38 @@ services:
       - shop-gateway
     networks: [backend]
 
+  shop-token-metrics:
+    build: ../shop-token-metrics
+    ports:
+      - "8088:8080"            # metryki tokenów LLM: http://localhost:8088/actuator/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  shop-qa-ui:
+    build:
+      context: ../shop-qa-ui
+      dockerfile: Containerfile
+    ports:
+      - "8501:8501"            # Streamlit UI: http://localhost:8501
+    depends_on:
+      shop-token-metrics:
+        condition: service_healthy
+    environment:
+      OPENROUTER_MODEL: "z-ai/glm-5.2"
+      OPENROUTER_REASONING_EFFORT: "high"
+      OPENROUTER_MAX_TOKENS: "32000"
+      TOKEN_METRICS_URL: http://shop-token-metrics:8080
+      TOKEN_METRICS_SOURCE: shop-qa-ui
+      SHOP_REPOS_DIR: /repos
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    volumes:
+      - ..:/repos:ro            # montuje katalog ai-bot-playground z wszystkimi repozytoriami
+    networks: [backend]
+
 volumes:
   kafka-data:
   postgres-data:
