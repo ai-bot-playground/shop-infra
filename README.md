@@ -26,42 +26,6 @@ Wszystkie repozytoria klonuj jako **siostrzane katalogi** w `ai-bot-playground/`
 
 **Stack serwisów:** Spring Boot 4.0.7 / Java 25 / Gradle 9.6. Każdy serwis (poza `shop-ui`) ma testy Cucumber + Testcontainers.
 
-## System — przegląd
-
-```mermaid
-graph LR
-    UI["shop-ui<br/>React"]
-    GW["shop-gateway<br/>API Gateway"]
-    CAT["shop-catalog"]
-    ORD["shop-order<br/>(saga)"]
-    INV["shop-inventory"]
-    PAY["shop-payment"]
-    NOT["shop-notification"]
-    K[["shop-kafka"]]
-    PG[("PostgreSQL")]
-    RD[("Redis")]
-
-    UI -->|HTTPS /api| GW
-    GW --> CAT
-    GW --> ORD
-    GW --> INV
-    ORD -. events .-> K
-    INV -. events .-> K
-    PAY -. events .-> K
-    K -. events .-> ORD
-    K -. events .-> INV
-    K -. events .-> PAY
-    K -. events .-> NOT
-    CAT --> PG
-    ORD --> PG
-    INV --> PG
-    PAY --> PG
-    NOT --> PG
-    INV --> RD
-    GW --> RD
-    CAT -. cache .-> RD
-```
-
 ## Uruchomienie lokalne (docker compose)
 
 ```bash
@@ -75,14 +39,13 @@ Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch pu
 
 ### Mapa portów
 
-| Element | URL / port | Rola |
+| Element | URL | Środowisko |
 |---|---|---|
-| shop-ui | http://localhost:3000 | UI kupującego |
-| shop-gateway | http://localhost:8080 | publiczny punkt wejścia |
-| kafka-ui | http://localhost:8081 | podgląd tematów |
-| shop-kafka | localhost:29092 | lokalny dostęp |
-| postgres | localhost:5432 | appuser/apppass |
-| redis | localhost:6379 | stock, locki, cache |
+| shop-ui | <http://localhost:3000> | docker compose |
+| shop-ui | <http://localhost:3001> | kind-preprod (port-forward-ui.ps1) |
+| kafka-ui | <http://localhost:8081> | docker compose |
+| shop-qa-ui | <http://localhost:8501> | lokalnie (`streamlit run app.py`) |
+| Grafana — LLM token dashboard | <http://localhost:3000> | kind-preprod (`kubectl port-forward svc/grafana 3000:3000`) |
 
 ## Architektura
 
@@ -90,45 +53,25 @@ Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch pu
 
 Kontenery `docker-compose.yml`, sieci `frontend` / `backend`. Na hosta wystawione tylko `shop-ui`, `shop-gateway` i narzędzia.
 
-```mermaid
-graph TB
-    buyer(("Kupujący"))
+```
+Kupujący
+  → shop-ui             [:3000]
+    → shop-gateway      [:8080]  ← publiczny punkt wejścia
+        ├── /api/products  → shop-catalog
+        ├── /api/orders    → shop-order
+        ├── /api/inventory → shop-inventory
+        └── rate limit     → Redis
 
-    subgraph host["Host (Docker)"]
-        UI["shop-ui<br/>React + nginx · :3000"]
+Serwisy backendu (sieć backend, port :8080 — niedostępne z zewnątrz):
+  shop-catalog     → PostgreSQL (catalog_db),    Redis (cache)
+  shop-inventory   → PostgreSQL (inventory_db),  Redis (stock, rezerwacje Lua)  ↔ Kafka
+  shop-order       → PostgreSQL (order_db)                                       ↔ Kafka
+  shop-payment     → PostgreSQL (payment_db)                                     ↔ Kafka
+  shop-notification → PostgreSQL (notification_db)                               ← Kafka
 
-        subgraph backend["sieć backend"]
-            GW["shop-gateway<br/>Spring Cloud Gateway · :8080"]
-            CAT["shop-catalog · :8080"]
-            ORD["shop-order · :8080"]
-            INV["shop-inventory · :8080"]
-            PAY["shop-payment · :8080"]
-            NOT["shop-notification · :8080"]
-            K[["shop-kafka (KRaft)<br/>:9092 / host :29092"]]
-            KUI["kafka-ui · :8081"]
-            PG[("PostgreSQL · :5432<br/>catalog / inventory / order /<br/>payment / notification _db")]
-            RD[("Redis · :6379")]
-        end
-    end
-
-    buyer -->|":3000"| UI
-    UI -->|"proxy /api → :8080"| GW
-    GW -->|"/api/products"| CAT
-    GW -->|"/api/orders"| ORD
-    GW -->|"/api/inventory"| INV
-    GW -->|"rate limit"| RD
-    CAT --> PG
-    ORD --> PG
-    INV --> PG
-    PAY --> PG
-    NOT --> PG
-    INV -->|"stock / rezerwacje"| RD
-    CAT -.->|"cache"| RD
-    ORD <--> K
-    INV <--> K
-    PAY <--> K
-    K --> NOT
-    KUI -.-> K
+Narzędzia:
+  kafka-ui  [:8081]   — podgląd tematów i consumer lag
+  shop-kafka [:29092] — dostęp lokalny z hosta
 ```
 
 ### Bazy danych (`database-per-service`)
@@ -153,26 +96,13 @@ graph TB
 Klucz `productId` na `inventory-events` gwarantuje kolejność per produkt. Konsumpcja jest *at-least-once* → konsumenci muszą być idempotentni (`processed_events` / `sent_notifications`). Po wyczerpaniu prób → `<temat>.DLT`.
 `shop-notification` nie ma własnego tematu — konsumuje terminalne zdarzenia bezpośrednio z `order-events` (własna grupa konsumenta).
 
-```mermaid
-graph LR
-    ORD["shop-order"]
-    INV["shop-inventory"]
-    PAY["shop-payment"]
-    NOT["shop-notification"]
-    OE(["order-events<br/>6p · orderId"])
-    IE(["inventory-events<br/>6p · productId"])
-    PE(["payment-events<br/>6p · orderId"])
-
-    ORD -->|"OrderCreated, ReleaseStock,<br/>OrderConfirmed/Cancelled/Rejected"| OE
-    OE -->|"OrderCreated, ReleaseStock"| INV
-    OE -->|"OrderConfirmed/Cancelled/Rejected"| NOT
-    INV -->|"StockReserved/Failed/Released"| IE
-    IE -->|"StockReserved/Failed"| ORD
-    ORD -->|"PaymentRequested"| PE
-    PE -->|"PaymentRequested"| PAY
-    PAY -->|"PaymentCompleted/Failed"| PE
-    PE -->|"PaymentCompleted/Failed"| ORD
-```
+| Producent | Temat | Konsument | Zdarzenia |
+|---|---|---|---|
+| shop-order | order-events | shop-inventory | OrderCreated, ReleaseStock |
+| shop-order | order-events | shop-notification | OrderConfirmed, OrderCancelled, OrderRejected |
+| shop-inventory | inventory-events | shop-order | StockReserved, StockReservationFailed |
+| shop-order | payment-events | shop-payment | PaymentRequested |
+| shop-payment | payment-events | shop-order | PaymentCompleted, PaymentFailed |
 
 ## Saga zakupu
 
@@ -182,23 +112,12 @@ Odpowiedź `202` wraca od razu; kolejne kroki dzieją się asynchronicznie. Stan
 - **Kompensacja (płatność odrzucona):** `PaymentFailed` → `CANCELLED` + `ReleaseStock` (INCRBY + DEL reservation, idempotentnie) → stock wraca. Bezpiecznik: TTL rezerwacji w Redis (jeśli `ReleaseStock` zaginie, rezerwacja i tak wygaśnie).
 - **Brak towaru:** `StockReservationFailed` → `REJECTED` (forward recovery, bez kompensacji — brak rezerwacji do cofnięcia).
 
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: POST /orders
-    PENDING --> RESERVED: StockReserved
-    PENDING --> REJECTED: StockReservationFailed
-    RESERVED --> CONFIRMED: PaymentCompleted
-    RESERVED --> CANCELLED: PaymentFailed / timeout
-    CONFIRMED --> [*]
-    REJECTED --> [*]
-    CANCELLED --> [*]
-
-    note right of CANCELLED
-        emisja ReleaseStock (kompensacja) + OrderCancelled
-    end note
-    note right of REJECTED
-        forward recovery — bez kompensacji + OrderRejected
-    end note
+```
+POST /orders → PENDING
+  PENDING  → RESERVED   (StockReserved)
+  PENDING  → REJECTED   (StockReservationFailed) → koniec  [forward recovery, OrderRejected]
+  RESERVED → CONFIRMED  (PaymentCompleted)        → koniec
+  RESERVED → CANCELLED  (PaymentFailed / timeout) → koniec  [ReleaseStock + OrderCancelled]
 ```
 
 ## Obserwowalność zużycia tokenów LLM
@@ -233,13 +152,6 @@ cd shop-catalog    # lub dowolny serwis
 $env:TESTCONTAINERS_RYUK_DISABLED = "true"; .\gradlew.bat test
 ```
 
-### Gotchas Boot 4 / Spring Cloud 2025.1 (wyłapane przez E2E)
-
-- **Kafka:** `spring-kafka` nie włącza `KafkaAutoConfiguration` → potrzebne `spring-boot-starter-kafka` (order/payment/inventory/notification).
-- **Gateway:** Spring Cloud Gateway 2025.1 czyta trasy pod `spring.cloud.gateway.server.webflux.routes` (stary `spring.cloud.gateway.routes` → 404).
-- **Jackson 3:** deserializacja do Jackson-2 `JsonNode` przez `RestClient` → `InvalidDefinitionException`. Fix: deserializacja do `Map`.
-- **Kafka probe:** `kafka-broker-api-versions.sh` jako exec-probe przekracza `timeoutSeconds=1` → crashloop. Fix: `tcpSocket` na 9092.
-
 ## Preprod (kind) i bramka CI
 
 PR do `main` jest bramkowany pełnym E2E na lokalnym klastrze `kind-preprod`. Gate działa na maszynie dewelopera. Kolejność startu: **podman → kind → runner**.
@@ -261,7 +173,22 @@ helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-
 .\register-preprod-runners.ps1 -Start
 ```
 
+
 Skrypty pomocnicze: `deploy-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
+
+
+### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
+
+Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-preprod.ps1`.
+
+```powershell
+# undeploy aplikacji
+helm uninstall shop --kube-context kind-preprod -n shop
+
+# zatrzymaj kontener kind (podman i docker compose dalej działają)
+podman stop preprod-control-plane
+```
+
 
 **Jak działa gate:** `pr-to-main.yml` (`on: pull_request`) → check `preprod-gate / gate` na runnerze `[self-hosted, <svc>]`. Mutex `Global\shop-preprod-gate` serializuje równoległe PR. Checkout 3 repo (kandydat, `shop-infra`, `shop-acceptance-tests`) → `podman build` → `kind load` → `helm upgrade` (baseline) → `kubectl set image` + `rollout status` → port-forward + `./gradlew test`. Zielone = PR odblokowany.
 
@@ -275,10 +202,3 @@ Repozytoria z runnerami: `shop-gateway`, `shop-catalog`, `shop-inventory`, `shop
 ```
 
 `shop-qa-ui` działa lokalnie (nie w klastrze): `cd ../shop-qa-ui; streamlit run app.py --server.port 8501`.
-
-### Gotchas gate'u
-
-- **Shell:** gate używa `defaults.run.shell: powershell`. Na Windows `shell: bash` = WSL launcher → brak podman/kubectl.
-- **Zawsze z `main`:** kandydat testowany przeciwko bieżącemu `main` (`gate.yml@main`, `ref: main` dla shop-infra i shop-acceptance-tests).
-- **Publiczne repo:** GitHub ostrzega przed self-hosted runnerami w publicznych repach (fork może uruchomić kod). Rozwiązanie: repo prywatne.
-- **Reboot:** nic nie startuje samo (`restart=no`) — podman machine i kontenery kind wymagają ręcznego startu. `podman machine stop` zatrzymuje też kontenery kind.

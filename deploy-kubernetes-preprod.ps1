@@ -14,9 +14,9 @@
       01-create-databases.sql / redis.conf, baked into the chart).
     * shop-infra -> IS the Helm chart used for `helm upgrade --install` (the
       deploy mechanism itself), applied from its current working tree.
-    * shop-qa-ui -> separate app: image legacy-documenter:dev built from the repo,
+    * shop-qa-ui -> separate app: image shop-qa-ui:dev built from the repo,
       loaded into kind, applied via its own kustomize (deploy/k8s, namespace
-      `legacy-documenter`). Needs a `legacy-documenter-secrets` secret (OpenRouter
+      `shop-qa-ui`). Needs a `shop-qa-ui-secrets` secret (OpenRouter
       key) — created here if missing (placeholder unless -OpenRouterApiKey /
       $env:OPENROUTER_API_KEY).
     * shop-acceptance-tests -> not a cluster workload; it's the E2E suite. Run it
@@ -76,6 +76,43 @@ foreach ($r in ($appServices + 'shop-infra','shop-postgres','shop-redis','shop-k
   }
 }
 
+# --- ensure self-hosted runners are running ----------------------------------
+$runnerRoot     = 'C:\actions-runner'
+$runnerServices = 'shop-gateway','shop-catalog','shop-inventory','shop-order',
+                  'shop-payment','shop-notification','shop-token-metrics'
+
+Log "Runners: checking self-hosted runners in $runnerRoot"
+foreach ($svc in $runnerServices) {
+  $dir = Join-Path $runnerRoot $svc
+  if (-not (Test-Path $dir)) {
+    Write-Warning "Runner not registered for $svc ($dir missing) — run register-preprod-runners.ps1 first"
+    continue
+  }
+
+  # Prefer the Windows service if installed
+  $svcName = "actions.runner.ai-bot-playground.$svc"
+  $winsvc  = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+  if ($winsvc) {
+    if ($winsvc.Status -ne 'Running') {
+      Log "START service $svcName"
+      Start-Service -Name $svcName
+    } else {
+      "    {0,-30} service: Running" -f $svc
+    }
+    continue
+  }
+
+  # Foreground mode: check if Runner.Listener is already running from this dir
+  $running = Get-Process -Name 'Runner.Listener' -ErrorAction SilentlyContinue |
+             Where-Object { $_.MainModule.FileName -like "$dir\*" }
+  if (-not $running) {
+    Log "START $svc runner (new window)"
+    Start-Process powershell -ArgumentList '-NoExit','-Command',"Set-Location '$dir'; .\run.cmd"
+  } else {
+    "    {0,-30} foreground: Running" -f $svc
+  }
+}
+
 # --- build images (from working tree) ----------------------------------------
 if (-not $SkipBuild) {
   foreach ($s in $appServices) {
@@ -84,15 +121,15 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { Die "podman build failed for $s" }
   }
   if (-not $SkipQaUi) {
-    Log "BUILD shop-qa-ui -> legacy-documenter:dev"
-    podman build -f (Join-Path $root 'shop-qa-ui\Containerfile') -t 'legacy-documenter:dev' (Join-Path $root 'shop-qa-ui')
+    Log "BUILD shop-qa-ui -> shop-qa-ui:dev"
+    podman build -f (Join-Path $root 'shop-qa-ui\Containerfile') -t 'shop-qa-ui:dev' (Join-Path $root 'shop-qa-ui')
     if ($LASTEXITCODE -ne 0) { Die "podman build failed for shop-qa-ui" }
   }
 } else { Log "SkipBuild: reusing existing images" }
 
 # --- load images into the kind node ------------------------------------------
 $imgs = $appServices | ForEach-Object { "localhost/$($_):$tag" }
-if (-not $SkipQaUi) { $imgs += 'legacy-documenter:dev' }
+if (-not $SkipQaUi) { $imgs += 'shop-qa-ui:dev' }
 $tar = Join-Path $env:TEMP 'shop-preprod-imgs.tar'
 Log "SAVE $($imgs.Count) images -> $tar"
 podman save -o $tar @imgs
@@ -123,30 +160,40 @@ foreach ($s in $appServices) {
 
 # --- shop-qa-ui (separate namespace, own kustomize) --------------------------
 if (-not $SkipQaUi) {
-  $qns = 'legacy-documenter'
+  $qns = 'shop-qa-ui'
   Log "QA-UI: namespace + secret + kustomize ($qns)"
   kubectl --context $ctx get ns $qns *> $null
   if ($LASTEXITCODE -ne 0) { kubectl --context $ctx create ns $qns | Out-Null }
 
-  kubectl --context $ctx -n $qns get secret legacy-documenter-secrets *> $null
+  kubectl --context $ctx -n $qns get secret shop-qa-ui-secrets *> $null
   if ($LASTEXITCODE -ne 0) {
     $key = if ($OpenRouterApiKey) { $OpenRouterApiKey } else { 'REPLACE_ME' }
-    kubectl --context $ctx -n $qns create secret generic legacy-documenter-secrets --from-literal=OPENROUTER_API_KEY=$key | Out-Null
-    if (-not $OpenRouterApiKey) { Write-Warning "qa-ui: created legacy-documenter-secrets with a PLACEHOLDER. Set -OpenRouterApiKey or `$env:OPENROUTER_API_KEY for real LLM calls." }
+    kubectl --context $ctx -n $qns create secret generic shop-qa-ui-secrets --from-literal=OPENROUTER_API_KEY=$key | Out-Null
+    if (-not $OpenRouterApiKey) { Write-Warning "qa-ui: created shop-qa-ui-secrets with a PLACEHOLDER. Set -OpenRouterApiKey or `$env:OPENROUTER_API_KEY for real LLM calls." }
   }
 
   kubectl --context $ctx apply -k (Join-Path $root 'shop-qa-ui\deploy\k8s')
   if ($LASTEXITCODE -ne 0) { Die "kubectl apply -k (qa-ui) failed" }
-  kubectl --context $ctx -n $qns rollout restart deployment/legacy-documenter *> $null
-  Log "ROLLOUT legacy-documenter"
-  kubectl --context $ctx -n $qns rollout status deployment/legacy-documenter --timeout=180s
+  kubectl --context $ctx -n $qns rollout restart deployment/shop-qa-ui *> $null
+  Log "ROLLOUT shop-qa-ui"
+  kubectl --context $ctx -n $qns rollout status deployment/shop-qa-ui --timeout=180s
   if ($LASTEXITCODE -ne 0) { Die "rollout status failed for qa-ui" }
 }
 
 # --- summary -----------------------------------------------------------------
 Log "DONE. Pods:"
 kubectl --context $ctx -n $ns get pods
-if (-not $SkipQaUi) { kubectl --context $ctx -n 'legacy-documenter' get pods }
+if (-not $SkipQaUi) { kubectl --context $ctx -n 'shop-qa-ui' get pods }
+
+# --- port-forward UI services (new window if not already listening) ----------
+$pf3001 = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue
+$pf8088 = Get-NetTCPConnection -LocalPort 8088 -State Listen -ErrorAction SilentlyContinue
+if (-not $pf3001 -or -not $pf8088) {
+  Log "PORT-FORWARD: starting in new window (shop-ui :3001, shop-token-metrics :8088)"
+  Start-Process powershell -ArgumentList '-NoExit','-File',(Join-Path $infra 'port-forward-ui.ps1')
+} else {
+  Log "PORT-FORWARD: already listening on 3001 + 8088"
+}
 
 # --- optional: acceptance E2E suite against the deployed stack ---------------
 if ($RunAcceptance) {
