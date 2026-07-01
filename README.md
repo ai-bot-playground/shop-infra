@@ -154,7 +154,7 @@ Wszystko zmergowane do `main`. Zaimplementowane:
 | shop-notification | konsumpcja terminalnych `Order*` + idempotentny send (`sent_notifications`) |
 | shop-ui | lista produktów + zakup (Idempotency-Key) + status (polling) |
 
-**E2E:** 3/3 scenariusze (happy path, out of stock, payment declined). `shop-ui` nie jest bramkowany suitem E2E — jego spec to `shop-ui/features/shopping-journey.feature`.
+**E2E:** 3/3 scenariusze (happy path, out of stock, payment declined). `shop-ui` nie wchodzi do cross-service suite'u E2E (jego spec to `shop-ui/features/shopping-journey.feature`), ale ma **własną bramkę preprod** `ui-preprod-gate` (build vite + deploy na kind-preprod + smoke-test) — patrz sekcja „Preprod (kind) i bramka CI".
 
 ## Testy komponentowe (lokalnie)
 
@@ -205,9 +205,11 @@ podman stop preprod-control-plane
 ```
 
 
-**Jak działa gate:** `pr-to-main.yml` (`on: pull_request`) → check `preprod-gate / gate` na runnerze `[self-hosted, <svc>]`. Mutex `Global\shop-preprod-gate` serializuje równoległe PR. Checkout 3 repo (kandydat, `shop-infra`, `shop-acceptance-tests`) → `podman build` → `kind load` → `helm upgrade` (baseline) → `kubectl set image` + `rollout status` → port-forward + `./gradlew test`. Zielone = PR odblokowany.
+**Jak działa gate (serwisy Java):** `pr-to-main.yml` (`on: pull_request`) → check `preprod-gate / gate` na runnerze `[self-hosted, <svc>]`. Mutex `Global\shop-preprod-gate` serializuje równoległe PR. Checkout 3 repo (kandydat, `shop-infra`, `shop-acceptance-tests`) → `gradlew test` → `podman build` → `kind load` → `helm upgrade` z `--set-string services.<svc>.image` + `rollout status` → port-forward + `./gradlew test` (acceptance). Zielone = PR odblokowany.
 
-Repozytoria z runnerami: `shop-gateway`, `shop-catalog`, `shop-inventory`, `shop-order`, `shop-payment`, `shop-notification`, `shop-token-metrics`.
+**Bramka shop-ui** (frontend, nie-Gradle): własny workflow `ui-preprod-gate / gate` na runnerze `[self-hosted, shop-ui]`. Nie używa reusable `gate.yml` (Java-specyficzny). Kroki: `npm ci` + `vite build` → `podman build` → `kind load` → `helm upgrade` z `--set-string services.shop-ui.image` + `rollout status deployment/shop-ui` → smoke-test (port-forward `svc/shop-ui`, GET `/` = 200 + `#root`). Dzieli ten sam klaster i mutex `Global\shop-preprod-gate` co bramki Java.
+
+Repozytoria z runnerami (`register-preprod-runners.ps1`): `shop-gateway`, `shop-catalog`, `shop-inventory`, `shop-order`, `shop-payment`, `shop-notification`, `shop-token-metrics`, `shop-ui`.
 
 ### Port-forward UI (kind-preprod)
 

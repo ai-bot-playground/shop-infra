@@ -24,15 +24,22 @@
   (Services -> actions.runner.* -> Log On) or it won't see kubeconfig/podman.
 
 .EXAMPLE
-  # configure all 7 runners, then run them in foreground windows:
+  # configure all 8 runners, then run them in foreground windows:
   .\register-preprod-runners.ps1 -Start
+
+.EXAMPLE
+  # register (or re-register) only the shop-ui runner:
+  .\register-preprod-runners.ps1 -Services shop-ui -Start
 #>
 [CmdletBinding()]
 param(
   [string]$Org = 'ai-bot-playground',
   [string]$RunnerRoot = 'C:\actions-runner',
+  # shop-ui ma wlasna bramke (ui-preprod-gate: npm+vite -> obraz -> kind -> smoke),
+  # ale routuje na runner tak samo: runs-on [self-hosted, shop-ui]. Node dostarcza
+  # actions/setup-node w workflow, wiec runner nie wymaga Node na PATH.
   [string[]]$Services = @('shop-gateway','shop-catalog','shop-inventory','shop-order',
-                          'shop-payment','shop-notification','shop-token-metrics'),
+                          'shop-payment','shop-notification','shop-token-metrics','shop-ui'),
   [switch]$Start,
   [switch]$InstallService
 )
@@ -100,6 +107,7 @@ if ($Start) {
 # --- verify on GitHub --------------------------------------------------------
 Write-Host "`n=== repo-level runners ==="
 foreach ($svc in $Services) {
-  $s = gh api "repos/$Org/$svc/actions/runners" --jq 'if .total_count==0 then "none" else ([.runners[]|"\(.name):\(.status)"]|join(", ")) end'
+  $r = gh api "repos/$Org/$svc/actions/runners" | ConvertFrom-Json
+  $s = if ($r.total_count -eq 0) { 'none' } else { ($r.runners | ForEach-Object { "$($_.name):$($_.status)" }) -join ', ' }
   "{0,-22} {1}" -f $svc, $s
 }
