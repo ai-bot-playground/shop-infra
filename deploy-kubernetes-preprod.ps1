@@ -186,6 +186,21 @@ if (-not $SkipQaUi) {
   Log "ROLLOUT shop-qa-ui"
   kubectl --context $ctx -n $qns rollout status deployment/shop-qa-ui --timeout=300s
   if ($LASTEXITCODE -ne 0) { Write-Warning "qa-ui rollout did not finish in 300s - check: kubectl -n shop-qa-ui get pods" }
+
+  # --- shop-qa-ui local Docker (port 8502, obok k8s port-forward 8501) --------
+  Log "QA-UI LOCAL: startuje lokalny kontener na porcie 8502"
+  podman stop shop-qa-ui-local *> $null
+  podman rm   shop-qa-ui-local *> $null
+  $envDocker = Join-Path $root 'shop-qa-ui\.env.docker'
+  $runEnvArgs = if (Test-Path $envDocker) { @('--env-file', $envDocker) }
+                else { @('--env', "OPENROUTER_API_KEY=$resolvedKey") }
+  # --network bridge: wymagane na Windows/WSL — pasta (domyślne) eksponuje porty tylko przez IPv6.
+  # $root zamontowany jako /workspace + SHOP_REPOS_DIR, by app.py mogła znaleźć siostrzane repozytoria.
+  podman run -d --name shop-qa-ui-local --network bridge -p 8502:8501 `
+    -v "${root}:/workspace:ro" --env SHOP_REPOS_DIR=/workspace `
+    @runEnvArgs localhost/shop-qa-ui:dev
+  if ($LASTEXITCODE -ne 0) { Write-Warning "shop-qa-ui-local container nie uruchomil sie - sprawdz: podman logs shop-qa-ui-local" }
+  else { Log "QA-UI LOCAL: http://localhost:8502 (kontener: shop-qa-ui-local)" }
 }
 
 # --- summary -----------------------------------------------------------------
@@ -199,10 +214,14 @@ $pf8088 = Get-NetTCPConnection -LocalPort 8088 -State Listen -ErrorAction Silent
 $pf8501 = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue
 $pf3002 = Get-NetTCPConnection -LocalPort 3002 -State Listen -ErrorAction SilentlyContinue
 if (-not $pf3001 -or -not $pf8088 -or -not $pf8501 -or -not $pf3002) {
-  Log "PORT-FORWARD: starting in new window (shop-ui :3001, shop-token-metrics :8088, shop-qa-ui :8501, grafana :3002)"
+  Log "PORT-FORWARD: starting in new window (shop-ui :3001, shop-token-metrics :8088, shop-qa-ui k8s :8501, grafana :3002)"
   Start-Process powershell -ArgumentList '-NoExit','-File',(Join-Path $infra 'port-forward-ui.ps1')
 } else {
   Log "PORT-FORWARD: already listening on 3001 + 8088 + 8501 + 3002"
+}
+if (-not $SkipQaUi) {
+  Log "shop-qa-ui k8s     -> http://localhost:8501 (port-forward-ui.ps1)"
+  Log "shop-qa-ui Docker  -> http://localhost:8502 (kontener: shop-qa-ui-local)"
 }
 
 # --- optional: acceptance E2E suite against the deployed stack ---------------

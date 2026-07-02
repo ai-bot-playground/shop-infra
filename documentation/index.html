@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ai-bot-playground — Architektura i workflow shop-qa-ui</title>
+<style>
+  :root{
+    --accent:#A100FF; --accent-2:#7a3cff; --ink:#17171f; --muted:#5c5c6b;
+    --bg:#ffffff; --panel:#f7f7fb; --line:#e6e6f0; --code:#f1ecff;
+    --ok:#0a8f5b; --warn:#c26a00; --bad:#c62828; --info:#2563eb;
+    --font:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    --mono:"Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:var(--font);color:var(--ink);background:#eef0f4;line-height:1.55}
+  .wrap{max-width:1080px;margin:0 auto;background:var(--bg);box-shadow:0 0 40px rgba(0,0,0,.06)}
+
+  header{background:radial-gradient(1100px 420px at 12% -30%,#2a0b4d,#0f0f18);color:#fff;padding:40px 48px 34px}
+  header .kicker{color:#c99bff;font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:12.5px}
+  header h1{margin:8px 0 6px;font-size:34px;line-height:1.15}
+  header p{margin:0;color:#d6c8f5;font-size:16px;max-width:70ch}
+  header .meta{margin-top:16px;color:#a99cce;font-size:13px}
+
+  main{padding:8px 48px 56px}
+  section{padding:30px 0;border-bottom:1px solid var(--line)}
+  section:last-child{border-bottom:0}
+  h2{font-size:25px;margin:0 0 2px;display:flex;align-items:center;gap:10px}
+  h2 .n{background:var(--accent);color:#fff;font-size:14px;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+  h2 + .rule{height:3px;width:56px;background:var(--accent);border-radius:3px;margin:8px 0 18px}
+  h3{font-size:18px;margin:22px 0 6px;color:var(--accent-2)}
+  p{font-size:15.5px;margin:.5em 0}
+  ul,ol{font-size:15.5px;margin:.4em 0;padding-left:22px}
+  li{margin:.32em 0}
+  small{color:var(--muted)}
+  code{background:var(--code);color:#3a1a66;padding:1px 6px;border-radius:5px;font-family:var(--mono);font-size:.85em}
+  b{color:var(--ink)}
+
+  .diagram{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin:6px 0}
+  .mermaid{display:flex;justify-content:center}
+  .mermaid svg{max-width:100%;height:auto}
+  .legend{font-size:13.5px;color:var(--muted);margin-top:10px}
+  .legend span{display:inline-block;margin-right:16px}
+
+  .note{border-left:4px solid var(--accent);background:#faf5ff;border-radius:0 10px 10px 0;padding:11px 15px;margin:14px 0;font-size:14.5px}
+  .note.warn{border-color:var(--warn);background:#fff6ea}
+  .note.info{border-color:var(--info);background:#eef3ff}
+  .note.ok{border-color:var(--ok);background:#effaf3}
+  .note b{color:var(--ink)}
+
+  /* stepper */
+  .step{position:relative;padding:0 0 6px 46px;margin:22px 0}
+  .step::before{content:attr(data-n);position:absolute;left:0;top:0;width:32px;height:32px;border-radius:50%;
+    background:var(--accent);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .step::after{content:"";position:absolute;left:15px;top:34px;bottom:-22px;width:2px;background:var(--line)}
+  .step:last-child::after{display:none}
+  .step h3{margin:2px 0 4px;color:var(--ink);font-size:19px}
+  .step .sub{color:var(--accent-2);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em}
+
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel);color:var(--accent-2)}
+  tbody tr:nth-child(even){background:#fbfbfe}
+
+  .flow{font-family:var(--mono);font-size:13px;background:#1e1e2e;color:#e6e6f0;border-radius:10px;padding:14px 16px;overflow:auto;white-space:pre;margin:10px 0}
+  .flow .a{color:#c99bff}.flow .g{color:#7ee787}.flow .y{color:#ffd479}
+
+  .toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin:18px 0;font-size:14.5px}
+  .toc a{color:var(--accent-2);text-decoration:none;margin-right:18px}
+  .toc a:hover{text-decoration:underline}
+  .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 16px;font-size:14.5px;margin:8px 0}
+  .kv div:nth-child(odd){color:var(--muted)}
+  footer{padding:22px 48px 40px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">ai-bot-playground · Accenture</div>
+  <h1>Architektura rozwiązania i workflow shop-qa-ui</h1>
+  <p>Jeden diagram całej architektury, a następnie dokładny rozpis tego, co dzieje się w agencie <code>shop-qa-ui</code> — krok po kroku, z odwołaniami do faktycznych funkcji w kodzie.</p>
+  <div class="meta">shop-infra/documentation · 2026-07-02</div>
+</header>
+
+<main>
+  <div class="toc">
+    <b>Spis:</b>
+    <a href="#arch">1 · Diagram architektury</a>
+    <a href="#wf">2 · Workflow shop-qa-ui</a>
+  </div>
+
+  <!-- ============ 1 · ARCHITEKTURA ============ -->
+  <section id="arch">
+    <h2><span class="n">1</span> Diagram architektury</h2>
+    <div class="rule"></div>
+    <p>Trzy płaszczyzny na jednym obrazie: <b>system sklepu</b> (runtime), <b>agent LLM + obserwowalność</b> oraz <b>bramka CI/CD preprod</b>. Ruch publiczny wchodzi wyłącznie przez <code>shop-gateway</code>; serwisy współpracują synchronicznie (REST przez gateway) i asynchronicznie (zdarzenia Kafki).</p>
+
+    <div class="diagram">
+      <pre class="mermaid">
+flowchart TB
+    buyer(("Kupujący"))
+
+    subgraph RT["System sklepu — runtime (compose / kind)"]
+      direction TB
+      UI["shop-ui<br/>React + nginx"]
+      GW["shop-gateway<br/>API Gateway"]
+      CAT["shop-catalog"]
+      ORD["shop-order<br/>saga"]
+      INV["shop-inventory"]
+      PAY["shop-payment"]
+      NOT["shop-notification"]
+      K[["shop-kafka<br/>(KRaft)"]]
+      PG[("PostgreSQL<br/>database-per-service")]
+      RD[("Redis<br/>stock · locki · cache")]
+      UI --> GW
+      GW --> CAT
+      GW --> ORD
+      GW --> INV
+      GW -. rate limit .-> RD
+      ORD <--> K
+      INV <--> K
+      PAY <--> K
+      K --> NOT
+      CAT --> PG
+      ORD --> PG
+      INV --> PG
+      PAY --> PG
+      NOT --> PG
+      INV --> RD
+      CAT -. cache .-> RD
+    end
+
+    subgraph AI["Agent LLM + obserwowalność"]
+      direction TB
+      QA["shop-qa-ui<br/>Streamlit"]
+      OR["OpenRouter<br/>GLM-5.2"]
+      TM["shop-token-metrics<br/>Micrometer"]
+      PROM["Prometheus"]
+      GRAF["Grafana<br/>dashboard tokenów"]
+      QA -->|"chat completions"| OR
+      OR -->|"usage: tokeny + koszt"| QA
+      QA -->|"POST /api/usage"| TM
+      PROM -->|"scrape"| TM
+      GRAF -->|"query"| PROM
+    end
+
+    subgraph CI["CI/CD — bramka preprod"]
+      direction TB
+      GH["GitHub<br/>PR → main"]
+      RUN["self-hosted runner<br/>[self-hosted, &lt;svc&gt;]"]
+      KIND[("kind-preprod<br/>Helm release 'shop'")]
+      GH --> RUN
+      RUN -->|"mutex Global\shop-preprod-gate"| KIND
+    end
+
+    buyer -->|":3000 / :80"| UI
+    QA -.->|"indeksuje kod 8 repo"| RT
+    QA ==>|"gh pr create"| GH
+    KIND -.->|"wdraża obrazy kandydatów"| RT
+    dev(("Deweloper")) --> GRAF
+      </pre>
+      <div class="legend">
+        <span>→ wywołanie / zależność synchroniczna</span>
+        <span>⇢ (kropki) zdarzenie / cache / relacja pośrednia</span>
+        <span>⟺ dwukierunkowa wymiana zdarzeń Kafki</span>
+      </div>
+    </div>
+    <p><small>Ten sam Helm umbrella chart (<code>services.&lt;name&gt;</code>, <code>type: spring | web</code>) opisuje wszystkie serwisy; bramka podmienia tylko obraz kandydata przez <code>--set-string services.&lt;svc&gt;.image</code>. <code>shop-qa-ui</code> i <code>shop-token-metrics</code> nie są indeksowanymi serwisami dziedzinowymi — to warstwa narzędziowa/obserwowalności.</small></p>
+  </section>
+
+  <!-- ============ 2 · WORKFLOW ============ -->
+  <section id="wf">
+    <h2><span class="n">2</span> Workflow shop-qa-ui — co dokładnie się dzieje</h2>
+    <div class="rule"></div>
+    <p><code>shop-qa-ui</code> to agent LLM działający <b>nad kodem</b> 8 repozytoriów sklepu. Prowadzi użytkownika przez 4-krokowy workflow (stepper w UI): <b>System Ready → Analyze → Piaskownica → PR</b>. Poniżej dokładny przebieg każdego kroku wraz z funkcjami, które go realizują.</p>
+
+    <div class="flow"><span class="a">manifest.yaml</span> → indeks (CodeChunk[]) → <span class="a">run_qa</span> (2× LLM) → rekomendacja
+   → <span class="a">plan_change</span> (mapa repo) → <span class="a">generate_file_change/new_file</span> → <span class="a">verify_completeness</span>
+   → <span class="a">open_pr_for_files</span> (git worktree + gh) → <span class="a">pr_checks</span> (bramka) → <span class="a">merge_pr</span>
+   (każde wywołanie LLM → <span class="y">_emit_token_metrics</span> → shop-token-metrics)</div>
+
+    <h3>Konfiguracja wejściowa</h3>
+    <div class="kv">
+      <div>Repozytoria</div><div><code>manifest.yaml</code> → wpisy <code>indexable: true</code> (8 repo), ścieżki względem <code>workspace_root</code> (nadpisywalne <code>SHOP_REPOS_DIR</code>)</div>
+      <div>Klucz LLM</div><div><code>OPENROUTER_API_KEY</code> (przez <code>.env.docker</code> w kontenerze / <code>.env</code> na hoście). Pusty/błędny → <b>401</b> i błąd w odpowiedzi.</div>
+      <div>Model / rozumowanie</div><div><code>OPENROUTER_MODEL=z-ai/glm-5.2</code>, <code>reasoning: effort=high</code>, <code>usage.include=true</code></div>
+      <div>Telemetria</div><div><code>TOKEN_METRICS_URL</code> → po każdym wywołaniu LLM <code>_emit_token_metrics()</code> wysyła <code>usage</code> (best-effort, nie blokuje)</div>
+    </div>
+
+    <!-- KROK 1 -->
+    <div class="step" data-n="1">
+      <div class="sub">Krok 1</div>
+      <h3>System Ready — indeksowanie</h3>
+      <p>W panelu bocznym wybierasz aplikację (z <code>manifest.yaml</code>) i klikasz <b>„⚡ Indeksuj aplikację"</b>. To operacja <b>czysto lokalna i statyczna — bez LLM i bez sieci</b>:</p>
+      <ul>
+        <li><code>ingest_app(repos)</code> → dla każdego repo <code>ingest_repo(path)</code>: rekurencyjny <code>rglob</code> po <code>.py/.java/.js/.jsx/.ts/.tsx/.mjs</code>, pomijając <code>_SKIP_DIRS</code> (<code>build/ .gradle/ node_modules/ .venv/ .git/ bin/ dist/ __pycache__/</code>).</li>
+        <li>Parsery per język: <b>Python</b> — AST (<code>FunctionDef</code>/<code>ClassDef</code>); <b>Java</b> — regex + liczenie głębokości <code>{}</code> (typy + metody/konstruktory); <b>JS/TS</b> — segmentacja deklaracji top-level.</li>
+        <li>Wynik: lista <code>CodeChunk</code> (<code>repo, file_path, symbol, start_line, end_line, source</code>) → zapis do <code>st.session_state.chunks</code> + mapa <code>repo_paths</code>.</li>
+      </ul>
+      <p>Ekran „System Ready" pokazuje liczbę zaindeksowanych symboli i przycisk <b>„Przejdź dalej →"</b>.</p>
+      <div class="note warn"><b>Charakter indeksu:</b> retrieval jest <b>słownikowy</b> (nie embeddingi), indeks jest <b>ulotny</b> (żyje w <code>session_state</code>, znika po odświeżeniu / „Nowym wątku"). Wiedza <em>dziedzinowa</em> (saga, zdarzenia) nie pochodzi z indeksu — jest w stałej <code>_SHOP_FACTS</code> wstrzykiwanej do każdego promptu.</div>
+    </div>
+
+    <!-- KROK 2 -->
+    <div class="step" data-n="2">
+      <div class="sub">Krok 2</div>
+      <h3>Analyze — pytanie, odpowiedź i rekomendacja</h3>
+      <p>Wpisujesz pytanie (np. „usuń z shop-ui możliwość logowania i wszystko z tym związane"). Klik <b>„Zapytaj ➜"</b> wywołuje <code>run_qa(question, chunks)</code>:</p>
+      <ol>
+        <li><b>Retrieval:</b> <code>keyword_search(chunks, question, top_k=5)</code> — przecięcie tokenów pytania i <code>symbol+source</code> chunka; brak trafień → zwraca całość (fallback).</li>
+        <li><b>Budowa kontekstu:</b> <code>_build_context()</code> skleja 5 chunków z nagłówkami <code>REPO/PLIK · FUNKCJA · LINIE</code>. Prompt = <code>_SHOP_FACTS</code> + <code>KOD</code> + <code>PYTANIE</code>.</li>
+        <li><b>Wywołanie LLM #1</b> (<code>_TECH_SYSTEM</code>) → odpowiedź techniczna wyłącznie na podstawie dostarczonego kodu.</li>
+        <li><b>Wywołanie LLM #2</b> (<code>_BIZ_SYSTEM</code>, JSON) → <code>business_context</code> (czas dev/test, impact, ryzyko, zależności), <code>feasibility</code> (werdykt + serwisy + pliki), <code>test_plan</code>, <code>proposals[]</code> oraz <code>recommended_index</code>/<code>recommended_reason</code>.</li>
+      </ol>
+      <p>Odpowiedź renderowana w 4 zakładkach: <b>Podsumowanie · Wykonalność · Plan testów · Źródła</b> (z cytatami <code>repo/plik:linia</code> i podglądem kodu). LLM wskazuje <b>jedną rekomendację</b> + rozważane alternatywy.</p>
+      <ul>
+        <li><b>Doprecyzowanie:</b> możesz dopisać uwagi („✍️ Doprecyzuj") → pytanie jest wzbogacane o twarde wymagania i <code>run_qa</code> jest wołane ponownie (nowa rekomendacja).</li>
+        <li><b>„✅ Akceptuj rekomendację i przejdź dalej"</b> → do <code>session_state</code> trafiają <code>sandbox_accepted_proposals</code>, <code>sandbox_question</code>, <code>sandbox_chunks</code>, a workflow przechodzi do Piaskownicy.</li>
+      </ul>
+    </div>
+
+    <!-- KROK 3 -->
+    <div class="step" data-n="3">
+      <div class="sub">Krok 3</div>
+      <h3>Piaskownica — planowanie, generowanie, weryfikacja, PR</h3>
+      <p>Dotyczy plików <b>serwisowych</b> (nie-<code>.py</code>). Przebiega etapami:</p>
+
+      <h3 style="margin-top:12px">3a. Planowanie zmiany w całej aplikacji</h3>
+      <p><code>build_repo_map(chunks)</code> tworzy konspekt <b>całej</b> aplikacji (repo → plik → symbole). <code>plan_change(question, repo_map, accepted_proposals)</code> pyta LLM, które pliki zmienić/utworzyć — zwraca JSON listę <code>{repo, path, action: modify|create, reason}</code>. To pozwala działać <b>cross-repo</b>, a nie tylko na top-5 z retrievalu. Dla <code>modify</code> wczytywany jest oryginał pliku; brak pliku → <code>create</code>.</p>
+
+      <h3>3b. Generowanie treści per plik</h3>
+      <ul>
+        <li><code>modify</code> → <code>generate_file_change(question, proposals, path, original)</code> — pełna nowa treść pliku.</li>
+        <li><code>create</code> → <code>generate_new_file(question, proposals, repo, path)</code>.</li>
+        <li><code>compute_diff(original, new)</code> (difflib) → podgląd diff w UI. <b>Pusta treść z modelu = brak zmiany</b> (celowo, żeby nie wygenerować diffu kasującego cały plik).</li>
+      </ul>
+
+      <h3>3c. Kontrola kompletności (agent-recenzent)</h3>
+      <p>Licznik „wygenerowano N/M plików" + „♻️ Ponów puste". <code>verify_completeness(question, proposals, repo_map, generated_files)</code> — drugi agent ocenia, czy zestaw plików wystarcza end-to-end; zwraca <code>{complete, notes, missing[]}</code>. Brakujące pliki można jednym kliknięciem <b>dodać do planu i wygenerować</b>.</p>
+
+      <h3>3d. Wystawienie Pull Requestów</h3>
+      <p>Pliki są grupowane <b>per repo</b> → <b>jeden PR na repo</b>. <code>open_pr_for_files(files, title, body, "ai-bot-playground/&lt;repo&gt;", local_repo)</code>:</p>
+      <div class="flow">git fetch origin main → git <span class="g">worktree add</span> (świeży origin/main)
+   → zapis plików → git add/commit → git <span class="g">push -u origin</span> &lt;branch&gt;
+   → gh <span class="g">pr create</span> --base main --head &lt;branch&gt;</div>
+      <div class="note info"><b>Testy lokalne nie blokują</b> wystawienia PR — właściwa walidacja dzieje się w CI (<code>preprod-gate</code>). Opcjonalnie <code>run_service_tests()</code> uruchamia <code>gradlew test</code> w izolowanym worktree (tylko serwisy Gradle). Cała ścieżka operuje na <b>lokalnych klonach repo + <code>gh</code></b> — nie dotyka uruchomionego stacku compose.</div>
+      <p>Wynik (URL/branch/success per repo) trafia do <code>qa_multi_prs</code> i workflow przechodzi do kroku PR.</p>
+    </div>
+
+    <!-- KROK 4 -->
+    <div class="step" data-n="4">
+      <div class="sub">Krok 4</div>
+      <h3>PR — status bramki i merge (human-in-the-loop)</h3>
+      <p>Panel PR pokazuje otwarte Pull Requesty i <b>odświeża status bramki co 15 s</b> (<code>@st.fragment(run_every=15)</code>):</p>
+      <ul>
+        <li><code>pr_checks(repo_slug, branch)</code> (przez <code>gh pr checks --json</code>) → agregacja stanów: <b>✅ success · ⏳ pending · ❌ failure · ⚠️ nieotwarte</b>.</li>
+        <li>Przy <b>failure</b>: lista nieudanych checków z linkami do logów + <code>pr_failure_summary()</code> (ogon logu CI) + komunikat „deweloper powinien zajrzeć i naprawić".</li>
+        <li>Ścieżka pojedynczego serwisu Java: po zielonej bramce <code>preprod-gate</code> UI podaje komendę <code>kubectl port-forward</code> do podglądu na preprod, a merge jest za <b>potwierdzeniem człowieka</b>: checkbox „potwierdzam, że działa" → <code>merge_pr()</code> (<code>gh pr merge --squash --delete-branch</code>).</li>
+      </ul>
+      <div class="note ok"><b>Pętla domknięta:</b> zmiana wygenerowana przez agenta jest wdrażana na realny klaster <code>kind-preprod</code> przez bramkę, człowiek weryfikuje efekt i dopiero wtedy merguje do <code>main</code>. Żaden krok nie omija bramki jakości.</div>
+    </div>
+
+    <h3>Przekrojowo — telemetria tokenów</h3>
+    <p>Każde wywołanie LLM (<code>run_qa</code>, <code>plan_change</code>, <code>generate_*</code>, <code>verify_completeness</code>) przechodzi przez <code>_call_openrouter()</code>, który po odpowiedzi wywołuje <code>_emit_token_metrics()</code> → <code>POST /api/usage</code> do <code>shop-token-metrics</code>. Micrometer wystawia liczniki (<code>llm_tokens_total</code>, <code>llm_requests_total</code>, <code>llm_cost_usd_total</code>), Prometheus je scrapuje, a Grafana rysuje dashboard „LLM Token Usage". Indeksowanie realistycznego, wielorepowego kodu jest więc <b>krokiem 0</b>, który generuje mierzalny ruch LLM obserwowany przez cały stack.</p>
+  </section>
+</main>
+<footer>ai-bot-playground · shop-infra/documentation · dokument wygenerowany na podstawie kodu <code>shop-qa-ui</code> (app.py, src/ingest.py, src/retriever.py, src/agent.py, src/sandbox.py)</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  window.addEventListener('load', function(){
+    if (!window.mermaid) return;
+    try{
+      mermaid.initialize({
+        startOnLoad:false, securityLevel:'loose', theme:'base',
+        flowchart:{ htmlLabels:true, curve:'basis' },
+        themeVariables:{
+          primaryColor:'#f3e8ff', primaryBorderColor:'#A100FF', primaryTextColor:'#17171f',
+          lineColor:'#7a3cff', secondaryColor:'#eef2ff', tertiaryColor:'#f7f7fb',
+          clusterBkg:'#faf7ff', clusterBorder:'#d9c7ff',
+          fontFamily:'Segoe UI, system-ui, sans-serif', fontSize:'14px'
+        }
+      });
+      mermaid.run({querySelector:'.mermaid'});
+    }catch(e){ /* brak sieci/CDN → tekst diagramu pozostaje czytelny */ }
+  });
+</script>
+</body>
+</html>

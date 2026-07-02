@@ -95,7 +95,7 @@ helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-
 ```
 
 
-Skrypty pomocnicze: `deploy-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
+Skrypty pomocnicze: `deploy-kubernetes-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
 
 ### Mapa portów
 
@@ -104,7 +104,8 @@ Skrypty pomocnicze: `deploy-preprod.ps1`, `register-preprod-runners.ps1`, `port-
 | shop-ui | <http://localhost:3000> | podman compose |
 | shop-ui | <http://localhost:3001> | kind-preprod (port-forward-ui.ps1) |
 | kafka-ui | <http://localhost:8081> | podman compose |
-| shop-qa-ui | <http://localhost:8501> | lokalnie (`streamlit run app.py`) |
+| shop-qa-ui (k8s) | <http://localhost:8501> | kind-preprod (port-forward-ui.ps1) |
+| shop-qa-ui (Docker) | <http://localhost:8502> | lokalny kontener uruchamiany przez `deploy-kubernetes-preprod.ps1` |
 | Grafana — LLM token dashboard | <http://localhost:3002> | kind-preprod (`kubectl port-forward svc/grafana 3002:3000`) |
 
 ## Architektura
@@ -225,4 +226,4 @@ Repozytoria z runnerami (`register-preprod-runners.ps1`): `shop-gateway`, `shop-
 # Grafana: kubectl --context kind-preprod -n shop port-forward svc/grafana 3000:3000
 ```
 
-`shop-qa-ui` działa lokalnie (nie w klastrze): `cd ../shop-qa-ui; streamlit run app.py --server.port 8501`.
+`shop-qa-ui` jest deployowany do klastra (port-forward na **:8501**) i jednocześnie uruchamiany jako lokalny kontener Docker na porcie **:8502** przez `deploy-kubernetes-preprod.ps1`. Oba tryby mogą działać równocześnie bez konfliktu portów.
