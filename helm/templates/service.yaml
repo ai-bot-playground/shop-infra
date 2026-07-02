@@ -7,11 +7,14 @@ metadata:
   labels:
     app: {{ $name }}
 spec:
-  type: ClusterIP
+  type: {{ if $svc.nodePort }}NodePort{{ else }}ClusterIP{{ end }}
   selector:
     app: {{ $name }}
   ports:
     - name: http
       port: {{ $svc.port }}
       targetPort: {{ $svc.port }}
+      {{- if $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
 {{- end }}

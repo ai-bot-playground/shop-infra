@@ -61,7 +61,9 @@ Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch pu
 
 ### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
 
-Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-kubernetes-preprod.ps1` (prefiks `.\` wymagany przez PowerShell).
+.\deploy-kubernetes-preprod.ps1 -SkipBuild
+
+Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-kubernetes-preprod.ps1` (prefiks `.\` wymagany przez PowerShell). 
 
 ```powershell
 # undeploy aplikacji
@@ -105,7 +107,7 @@ Skrypty pomocnicze: `deploy-kubernetes-preprod.ps1`, `register-preprod-runners.p
 | shop-ui | <http://localhost:3001> | kind-preprod (port-forward-ui.ps1) |
 | kafka-ui | <http://localhost:8081> | podman compose |
 | shop-qa-ui (k8s) | <http://localhost:8501> | kind-preprod (port-forward-ui.ps1) |
-| shop-qa-ui (Docker) | <http://localhost:8502> | lokalny kontener uruchamiany przez `deploy-kubernetes-preprod.ps1` |
+| shop-qa-ui (lokalnie) | <http://localhost:8502> | natywnie (`shop-qa-ui/run-local.ps1`), uruchamiany przez `deploy-kubernetes-preprod.ps1` |
 | Grafana — LLM token dashboard | <http://localhost:3002> | kind-preprod (`kubectl port-forward svc/grafana 3002:3000`) |
 
 ## Architektura
@@ -226,4 +228,4 @@ Repozytoria z runnerami (`register-preprod-runners.ps1`): `shop-gateway`, `shop-
 # Grafana: kubectl --context kind-preprod -n shop port-forward svc/grafana 3000:3000
 ```
 
-`shop-qa-ui` jest deployowany do klastra (port-forward na **:8501**) i jednocześnie uruchamiany jako lokalny kontener Docker na porcie **:8502** przez `deploy-kubernetes-preprod.ps1`. Oba tryby mogą działać równocześnie bez konfliktu portów.
+`shop-qa-ui` jest deployowany do klastra (port-forward na **:8501**) i jednocześnie uruchamiany **natywnie** (bez kontenera) na porcie **:8502** przez `deploy-kubernetes-preprod.ps1` via `shop-qa-ui/run-local.ps1`. Natywny tryb umożliwia zapis do lokalnych repozytoriów i `gh pr create` z Windows Credential Manager.

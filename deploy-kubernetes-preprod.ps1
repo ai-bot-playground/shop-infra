@@ -187,20 +187,28 @@ if (-not $SkipQaUi) {
   kubectl --context $ctx -n $qns rollout status deployment/shop-qa-ui --timeout=300s
   if ($LASTEXITCODE -ne 0) { Write-Warning "qa-ui rollout did not finish in 300s - check: kubectl -n shop-qa-ui get pods" }
 
-  # --- shop-qa-ui local Docker (port 8502, obok k8s port-forward 8501) --------
-  Log "QA-UI LOCAL: startuje lokalny kontener na porcie 8502"
+  # --- shop-qa-ui local (port 8502, obok k8s port-forward 8501) ----------------
+  # Uruchamiane NATYWNIE (nie w kontenerze). Powód: funkcja "Otwórz PR"
+  # (shop-qa-ui/src/sandbox.py) pisze do .git lokalnych repo, robi `git push`
+  # (Windows Credential Manager) i `gh pr create`. Kontener montował /workspace
+  # jako read-only, nie miał `gh` ani tokenu GitHub, więc PR-y padały na
+  # "cannot open '.git/FETCH_HEAD': Read-only file system". Na hoście repo są
+  # zapisywalne, gh jest zalogowany, git push ma poświadczenia — działa.
+  # Szczegóły i bootstrap venv: shop-qa-ui/run-local.ps1.
+  Log "QA-UI LOCAL: startuje natywnie na porcie 8502"
+  # Sprzątanie po starym trybie kontenerowym (gdyby kontener został z poprzedniego uruchomienia).
   podman stop shop-qa-ui-local *> $null
   podman rm   shop-qa-ui-local *> $null
-  $envDocker = Join-Path $root 'shop-qa-ui\.env.docker'
-  $runEnvArgs = if (Test-Path $envDocker) { @('--env-file', $envDocker) }
-                else { @('--env', "OPENROUTER_API_KEY=$resolvedKey") }
-  # --network bridge: wymagane na Windows/WSL — pasta (domyślne) eksponuje porty tylko przez IPv6.
-  # $root zamontowany jako /workspace + SHOP_REPOS_DIR, by app.py mogła znaleźć siostrzane repozytoria.
-  podman run -d --name shop-qa-ui-local --network bridge -p 8502:8501 `
-    -v "${root}:/workspace:ro" --env SHOP_REPOS_DIR=/workspace `
-    @runEnvArgs localhost/shop-qa-ui:dev
-  if ($LASTEXITCODE -ne 0) { Write-Warning "shop-qa-ui-local container nie uruchomil sie - sprawdz: podman logs shop-qa-ui-local" }
-  else { Log "QA-UI LOCAL: http://localhost:8502 (kontener: shop-qa-ui-local)" }
+  $qaUiRun = Join-Path $root 'shop-qa-ui\run-local.ps1'
+  $pf8502 = Get-NetTCPConnection -LocalPort 8502 -State Listen -ErrorAction SilentlyContinue
+  if ($pf8502) {
+    Log "QA-UI LOCAL: port 8502 juz nasluchuje - pomijam start"
+  } elseif (Test-Path $qaUiRun) {
+    Start-Process powershell -ArgumentList '-NoExit','-File',$qaUiRun,'-Port','8502'
+    Log "QA-UI LOCAL: http://localhost:8502 (natywnie, nowe okno; pierwszy start tworzy .venv)"
+  } else {
+    Write-Warning "QA-UI LOCAL: nie znaleziono $qaUiRun - pomijam"
+  }
 }
 
 # --- summary -----------------------------------------------------------------
@@ -221,7 +229,7 @@ if (-not $pf3001 -or -not $pf8088 -or -not $pf8501 -or -not $pf3002) {
 }
 if (-not $SkipQaUi) {
   Log "shop-qa-ui k8s     -> http://localhost:8501 (port-forward-ui.ps1)"
-  Log "shop-qa-ui Docker  -> http://localhost:8502 (kontener: shop-qa-ui-local)"
+  Log "shop-qa-ui local   -> http://localhost:8502 (natywnie: shop-qa-ui/run-local.ps1)"
 }
 
 # --- optional: acceptance E2E suite against the deployed stack ---------------
