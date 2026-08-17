@@ -16,7 +16,7 @@
       deploy mechanism itself), applied from its current working tree.
     * shop-qa-ui -> separate app: image localhost/shop-qa-ui:dev built from the repo,
       loaded into kind, applied via its own kustomize (deploy/k8s, namespace
-      `shop-qa-ui`). Needs a `shop-qa-ui-secrets` secret (OpenRouter
+      `shop` - same as every other service). Needs a `shop-qa-ui-secrets` secret (OpenRouter
       key) — created here if missing (placeholder unless -OpenRouterApiKey /
       $env:OPENROUTER_API_KEY).
     * shop-acceptance-tests -> not a cluster workload; it's the E2E suite. Run it
@@ -185,7 +185,7 @@ if (-not $SkipQaUi) {
   kubectl --context $ctx -n $qns rollout restart deployment/shop-qa-ui *> $null
   Log "ROLLOUT shop-qa-ui"
   kubectl --context $ctx -n $qns rollout status deployment/shop-qa-ui --timeout=300s
-  if ($LASTEXITCODE -ne 0) { Write-Warning "qa-ui rollout did not finish in 300s - check: kubectl -n shop-qa-ui get pods" }
+  if ($LASTEXITCODE -ne 0) { Write-Warning "qa-ui rollout did not finish in 300s - check: kubectl -n $qns get pods" }
 
   # --- shop-qa-ui local (port 8502, obok k8s port-forward 8501) ----------------
   # Uruchamiane NATYWNIE (nie w kontenerze). Powód: funkcja "Otwórz PR"
@@ -214,7 +214,7 @@ if (-not $SkipQaUi) {
 # --- summary -----------------------------------------------------------------
 Log "DONE. Pods:"
 kubectl --context $ctx -n $ns get pods
-if (-not $SkipQaUi) { kubectl --context $ctx -n 'shop-qa-ui' get pods }
+if (-not $SkipQaUi) { kubectl --context $ctx -n $qns get pods }
 
 # --- port-forward UI services (new window if not already listening) ----------
 $pf3001 = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue

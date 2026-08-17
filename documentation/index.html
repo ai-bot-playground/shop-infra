@@ -244,7 +244,7 @@ flowchart TB
       <div class="flow">git fetch origin main → git <span class="g">worktree add</span> (świeży origin/main)
    → zapis plików → git add/commit → git <span class="g">push -u origin</span> &lt;branch&gt;
    → gh <span class="g">pr create</span> --base main --head &lt;branch&gt;</div>
-      <div class="note info"><b>Testy lokalne nie blokują</b> wystawienia PR — właściwa walidacja dzieje się w CI (<code>preprod-gate</code>). Opcjonalnie <code>run_service_tests()</code> uruchamia <code>gradlew test</code> w izolowanym worktree (tylko serwisy Gradle). Cała ścieżka operuje na <b>lokalnych klonach repo + <code>gh</code></b> — nie dotyka uruchomionego stacku compose.</div>
+      <div class="note info"><b>Lokalna walidacja BLOKUJE</b> wystawienie PR — przycisk jest nieaktywny, dopóki każde zmienione repo nie ma zielonego wyniku z <code>validate_file_changes()</code> (izolowany worktree: <code>git diff --check</code>, następnie <code>gradlew classes testClasses --offline</code> lub <code>npm ci --offline</code> + <code>npm run build</code>). CI (<code>preprod-gate</code>) pozostaje drugą, pełną bramką. Błędy środowiska (brak pakietów w cache, nieudane połączenie loopback Gradle'a) są oznaczane jako <code>environment</code> i <b>nie</b> trafiają do LLM jako błędy kodu. Cała ścieżka operuje na <b>lokalnych klonach repo + <code>gh</code></b> — nie dotyka uruchomionego stacku compose.</div>
       <p>Wynik (URL/branch/success per repo) trafia do <code>qa_multi_prs</code> i workflow przechodzi do kroku PR.</p>
     </div>
 
@@ -252,11 +252,11 @@ flowchart TB
     <div class="step" data-n="4">
       <div class="sub">Krok 4</div>
       <h3>PR — status bramki i merge (human-in-the-loop)</h3>
-      <p>Panel PR pokazuje otwarte Pull Requesty i <b>odświeża status bramki co 15 s</b> (<code>@st.fragment(run_every=15)</code>):</p>
+      <p>Panel PR pokazuje otwarte Pull Requesty i <b>odświeża status bramki co 15 s</b> (<code>@st.fragment(run_every=15)</code>). Gdy wszystkie PR-y osiągną stan końcowy (zielony / czerwony / zmergowany), auto-odświeżanie się wyłącza — nie wołamy <code>gh</code> bez potrzeby i nie przerywamy klikania merge:</p>
       <ul>
-        <li><code>pr_checks(repo_slug, branch)</code> (przez <code>gh pr checks --json</code>) → agregacja stanów: <b>✅ success · ⏳ pending · ❌ failure · ⚠️ nieotwarte</b>.</li>
+        <li><code>pr_checks(repo_slug, branch)</code> (przez <code>gh pr checks --json</code>) → agregacja stanów: <b>✅ success · ⏳ pending · ❌ failure · ⚠️ nieotwarte · 🔀 zmergowane</b>.</li>
         <li>Przy <b>failure</b>: lista nieudanych checków z linkami do logów + <code>pr_failure_summary()</code> (ogon logu CI) + komunikat „deweloper powinien zajrzeć i naprawić".</li>
-        <li>Ścieżka pojedynczego serwisu Java: po zielonej bramce <code>preprod-gate</code> UI podaje komendę <code>kubectl port-forward</code> do podglądu na preprod, a merge jest za <b>potwierdzeniem człowieka</b>: checkbox „potwierdzam, że działa" → <code>merge_pr()</code> (<code>gh pr merge --squash --delete-branch</code>).</li>
+        <li>Przy <b>zielonej bramce</b> (każde repo osobno, bo PR jest jeden na repo): UI podaje komendę <code>kubectl port-forward</code> do podglądu na preprod (<code>shop-gateway</code>, a dla zmian w <code>shop-ui</code> — <code>shop-ui</code>), a merge jest za <b>potwierdzeniem człowieka</b>: checkbox „potwierdzam, że działa na preprod" odblokowuje <code>merge_pr()</code> (<code>gh pr merge --squash --delete-branch</code>).</li>
       </ul>
       <div class="note ok"><b>Pętla domknięta:</b> zmiana wygenerowana przez agenta jest wdrażana na realny klaster <code>kind-preprod</code> przez bramkę, człowiek weryfikuje efekt i dopiero wtedy merguje do <code>main</code>. Żaden krok nie omija bramki jakości.</div>
     </div>
@@ -265,7 +265,7 @@ flowchart TB
     <p>Każde wywołanie LLM (<code>run_qa</code>, <code>plan_change</code>, <code>generate_*</code>, <code>verify_completeness</code>) przechodzi przez <code>_call_openrouter()</code>, który po odpowiedzi wywołuje <code>_emit_token_metrics()</code> → <code>POST /api/usage</code> do <code>shop-token-metrics</code>. Micrometer wystawia liczniki (<code>llm_tokens_total</code>, <code>llm_requests_total</code>, <code>llm_cost_usd_total</code>), Prometheus je scrapuje, a Grafana rysuje dashboard „LLM Token Usage". Indeksowanie realistycznego, wielorepowego kodu jest więc <b>krokiem 0</b>, który generuje mierzalny ruch LLM obserwowany przez cały stack.</p>
   </section>
 </main>
-<footer>ai-bot-playground · shop-infra/documentation · dokument wygenerowany na podstawie kodu <code>shop-qa-ui</code> (app.py, src/ingest.py, src/retriever.py, src/agent.py, src/sandbox.py)</footer>
+<footer>ai-bot-playground · shop-infra/documentation · dokument opisuje kod <code>shop-qa-ui</code> (app.py, src/ingest.py, src/retriever.py, src/agent.py, src/fake_llm.py, src/sandbox.py) · zaktualizowany 15.08.2026</footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
