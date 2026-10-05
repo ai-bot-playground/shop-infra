@@ -75,6 +75,83 @@ podman stop preprod-control-plane
 
 
 
+### Podman na tej maszynie: DOCKER_HOST i Testcontainers
+
+Trzy rzeczy, ktore trzeba ustawic, zanim `podman compose` albo Testcontainers zadzialaja
+z Windowsa. Wszystkie wynikaja z tego, jak WSL laczy sie z hostem — zadna nie wymaga admina.
+
+1. **Porty kontenerow sa osiagalne pod IP maszyny WSL, nie pod `localhost`.**
+   `localhostForwarding` na tej maszynie nie dziala (sprawdzone takze z jawnym wpisem
+   w `.wslconfig`). `podman ps` pokazuje `0.0.0.0:PORT->...`, z wnetrza maszyny port
+   odpowiada, a `127.0.0.1:PORT` z Windowsa — nie. Adres maszyny:
+
+   ```powershell
+   $ip = (podman machine ssh -- ip -4 -o addr show eth0 | Select-String '(\d+\.\d+\.\d+\.\d+)/').Matches[0].Groups[1].Value
+   ```
+
+2. **Brak `\.\pipe\docker_engine`** — Testcontainers nie znajduje srodowiska Dockera
+   („Could not find a valid Docker environment"). Wystaw API podmana po TCP w maszynie:
+
+   ```powershell
+   podman machine ssh --username root "nohup podman system service --time=0 tcp://0.0.0.0:2375 >/tmp/pmapi.log 2>&1 &"
+   ```
+
+3. **Ryuk (reaper Testcontainers) jest nieosiagalny** — stad `Could not connect to Ryuk`.
+
+Komplet zmiennych do uruchomienia testow komponentowych:
+
+```powershell
+$ip = '172.23.113.114'                      # patrz punkt 1 — zmienia sie po restarcie maszyny
+$env:DOCKER_HOST                = "tcp://${ip}:2375"
+$env:TESTCONTAINERS_HOST_OVERRIDE = $ip
+$env:TESTCONTAINERS_RYUK_DISABLED = 'true'
+cd ..\shop-catalog; .\gradlew.bat test
+```
+
+Uwaga: `podman system service` po TCP jest **nieuwierzytelnione**. Slucha na interfejsie
+maszyny WSL (osiagalnym tylko z tego hosta), ale nie zostawiaj go uruchomionego na stale —
+konczy sie z `podman machine stop`.
+
+Poniewaz porty ida przez IP maszyny, a nie `localhost`, adresy z „Mapy portow" nizej
+czytaj jako `http://<IP-maszyny>:<port>` dopoki `localhostForwarding` nie zacznie dzialac.
+
+### Awaryjnie: uruchomienie BEZ kontenerow (`start-native-no-containers.ps1`)
+
+Gdy `podman machine start` konczy sie bledem
+
+```
+Wsl/Service/CreateInstance/CreateVm/HCS/0x80070569
+```
+
+(`ERROR_LOGON_TYPE_NOT_GRANTED`), WSL nie tworzy **zadnej** maszyny — sprawdz
+`wsl -d Ubuntu -- echo ok`. Padaja wtedy naraz: `podman compose`, kind-preprod
+i Testcontainers. Naprawa wymaga admina (prawo „Log on as a service" dla
+`NT VIRTUAL MACHINE\Virtual Machines`, zwykle skasowane przez GPO).
+
+Do czasu naprawy caly sklep da sie uruchomic natywnie — serwisy to zwykle procesy
+Javy, a Postgres/Redis/Kafka maja buildy na Windows:
+
+```powershell
+.\start-native-no-containers.ps1          # pobiera infra, tworzy bazy i tematy, startuje 7 serwisow
+.\start-native-no-containers.ps1 -Stop    # zatrzymuje wszystko
+```
+
+Skrypt odwzorowuje `docker-compose.yml` 1:1 (te same zmienne srodowiskowe), tylko
+nazwy hostow zamienia na `localhost`, a serwisom nadaje osobne porty:
+gateway `8090` (przestawialny `-GatewayPort`), catalog `8081`, inventory `8082`,
+order `8083`, payment `8084`, notification `8085`, token-metrics `8088`.
+
+Weryfikacja na zywo:
+
+```powershell
+$env:SHOP_GATEWAY_URL = 'http://localhost:8090'
+cd ..\shop-acceptance-tests; .\gradlew.bat test      # 3 scenariusze E2E
+cd ..\shop-ui; npx vite --config vite.config.native.mjs   # UI na :3000
+```
+
+Czego to NIE zastepuje: bramki `preprod-gate`, klastra kind i testow komponentowych
+na Testcontainers — one nadal wymagaja dzialajacych kontenerow.
+
 ## Preprod (kind) i bramka CI
 
 PR do `main` jest bramkowany pełnym E2E na lokalnym klastrze `kind-preprod`. Gate działa na maszynie dewelopera. Kolejność startu: **podman → kind → runner**.
@@ -85,7 +162,7 @@ podman machine start
 
 # 2) klaster kind
 $env:KIND_EXPERIMENTAL_PROVIDER = "podman"
-podman start preprod-control-plane
+podman start preprod-control-plane              # gdy klastra nie ma: .\create-kind-preprod.ps1
 kubectl --context kind-preprod get nodes        # STATUS = Ready
 
 # 3) deploy stacku (Helm)
@@ -97,7 +174,11 @@ helm upgrade --install shop ./helm --kube-context kind-preprod -n shop --create-
 ```
 
 
-Skrypty pomocnicze: `deploy-kubernetes-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
+Skrypty pomocnicze: `create-kind-preprod.ps1`, `deploy-kubernetes-preprod.ps1`, `register-preprod-runners.ps1`, `port-forward-ui.ps1`.
+
+**Nowy klaster (`create-kind-preprod.ps1`).** Porty kontenerów nie są tu osiągalne pod `localhost` (patrz „Podman na tej maszynie"), więc domyślny klaster kind jest z Windowsa martwy. Skrypt publikuje API server na interfejsie maszyny WSL, kubeconfig wskazuje `https://<IP-maszyny>:6443` z `tls-server-name=localhost` (SAN, który kind zawsze ma). Po restarcie maszyny (nowe IP): `.\create-kind-preprod.ps1 -RefreshKubeconfig`.
+
+**Runnery i Testcontainers.** Etap komponentowy bramki potrzebuje tych samych zmiennych co lokalne testy — wpisz je do `C:\actions-runner\<svc>\.env` (runner czyta ten plik przy starcie): `DOCKER_HOST`, `TESTCONTAINERS_HOST_OVERRIDE`, `TESTCONTAINERS_RYUK_DISABLED=true`.
 
 ### Mapa portów
 
@@ -215,7 +296,11 @@ cd shop-catalog    # lub dowolny serwis
 $env:TESTCONTAINERS_RYUK_DISABLED = "true"; .\gradlew.bat test
 ```
 
-**Jak działa gate (serwisy Java):** `pr-to-main.yml` (`on: pull_request`) → check `preprod-gate / gate` na runnerze `[self-hosted, <svc>]`. Mutex `Global\shop-preprod-gate` serializuje równoległe PR. Checkout 3 repo (kandydat, `shop-infra`, `shop-acceptance-tests`) → `gradlew test` → `podman build` → `kind load` → `helm upgrade` z `--set-string services.<svc>.image` + `rollout status` → port-forward + `./gradlew test` (acceptance). Zielone = PR odblokowany.
+**Jak działa gate (serwisy Java):** `pr-to-main.yml` (`on: pull_request`) → check `preprod-gate / gate` na runnerze `[self-hosted, <svc>]`. Mutex `Global\shop-preprod-gate` serializuje równoległe PR. Checkout 3 repo (kandydat, `shop-infra`, `shop-acceptance-tests`) → `gradlew test` → `podman build` → `kind load` → `helm upgrade` z `--set-string services.<svc>.image` + `rollout status` → port-forward + `./gradlew test` (acceptance). Zielone = PR odblokowany. Czerwone po wdrożeniu = bramka (wciąż pod mutexem) przywraca obraz bazowy, żeby zepsuty kandydat nie został na wspólnym preprod.
+
+**Po merge'u (`promote-preprod.yml` → `shop-acceptance-tests/.github/workflows/promote.yml`):** `push` do `main` odbudowuje obraz bazowy `localhost/<svc>:0.0.1` z `main`, ładuje go do kind i restartuje deployment (ten sam mutex). Każda bramka robi `helm upgrade` z obrazami bazowymi — bez tego kroku następna bramka dowolnego repo cofała zmergowaną zmianę z preprod.
+
+**Podgląd przed merge'em jest ulotny:** kandydat zostaje na preprod tylko do następnej bramki dowolnego repo (ta wdraża bazę + swojego kandydata). Przy kilku PR-ach naraz sprawdzaj zmianę zaraz po zielonej bramce.
 
 **Bramka shop-ui** (frontend, nie-Gradle): własny workflow `ui-preprod-gate / gate` na runnerze `[self-hosted, shop-ui]`. Nie używa reusable `gate.yml` (Java-specyficzny). Kroki: `npm ci` + `vite build` → `podman build` → `kind load` → `helm upgrade` z `--set-string services.shop-ui.image` + `rollout status deployment/shop-ui` → smoke-test (port-forward `svc/shop-ui`, GET `/` = 200 + `#root`). Dzieli ten sam klaster i mutex `Global\shop-preprod-gate` co bramki Java.
 
