@@ -1,9 +1,14 @@
 {{- if .Values.infra.enabled }}
 {{- $kafka := .Values.infra.kafka }}
 ---
-# Single-node Kafka in KRaft mode (no ZooKeeper). Ephemeral storage: fine for a
-# self-contained preprod/prod demo cluster. The controller quorum points at
+# Single-node Kafka in KRaft mode (no ZooKeeper). The controller quorum points at
 # localhost:9093 so the single node bootstraps without needing its own Service.
+#
+# Storage: emptyDir, like postgres/redis — survives container restarts (node
+# restart, crash, OOM) but not pod deletion. Without it the log dir lived in the
+# container layer: any restart wiped every topic, and since auto-create is off and
+# topics come only from the post-install/upgrade hook below, all sagas silently
+# hung in PENDING until the next `helm upgrade` (seen after a podman machine restart).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,6 +47,12 @@ spec:
             - { name: KAFKA_NUM_PARTITIONS, value: "6" }
             - { name: KAFKA_HEAP_OPTS, value: "-Xmx512M -Xms256M" }
             - { name: CLUSTER_ID, value: {{ $kafka.clusterId | quote }} }
+            # Explicit: the env-generated server.properties has no log.dirs, so the
+            # broker falls back to Kafka's default /tmp/kafka-logs — outside the volume.
+            - { name: KAFKA_LOG_DIRS, value: "/var/lib/kafka/data" }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
           # TCP probes only: spawning kafka-broker-api-versions.sh forks a JVM
           # (~3-5s) which always blows the 1s exec-probe timeout and crash-loops
           # the broker. A listening 9092 means the broker is unfenced + serving.
@@ -66,6 +77,9 @@ spec:
               memory: "512Mi"
             limits:
               memory: "1Gi"
+      volumes:
+        - name: data
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
