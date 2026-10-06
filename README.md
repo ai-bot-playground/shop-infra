@@ -61,9 +61,7 @@ Serwisy backendowe nasłuchują na `:8080` wewnątrz sieci `backend` — ruch pu
 
 ### Uruchomienie / zatrzymanie klastra (bez wyłączania podmana)
 
-.\deploy-kubernetes-preprod.ps1 -SkipBuild
-
-Ponowne uruchomienie: `podman start preprod-control-plane`, następnie `.\deploy-kubernetes-preprod.ps1` (prefiks `.\` wymagany przez PowerShell). 
+Ponowne uruchomienie: `.\start-dev.ps1` (patrz „Preprod (kind) i bramka CI") — startuje węzeł i sprawdza całość; pełne wdrożenie od nowa: `.\start-dev.ps1 -Deploy` albo `.\deploy-kubernetes-preprod.ps1 -SkipBuild` (prefiks `.\` wymagany przez PowerShell).
 
 ```powershell
 # undeploy aplikacji
@@ -155,6 +153,27 @@ na Testcontainers — one nadal wymagaja dzialajacych kontenerow.
 ## Preprod (kind) i bramka CI
 
 PR do `main` jest bramkowany pełnym E2E na lokalnym klastrze `kind-preprod`. Gate działa na maszynie dewelopera. Kolejność startu: **podman → kind → runner**.
+
+**Po starcie komputera / restarcie maszyny podmana — jedna komenda:**
+
+```powershell
+.\start-dev.ps1
+```
+
+Idempotentnie, z podsumowaniem `OK`/`UWAGA`/`FAIL` i kodem wyjścia ≠ 0 przy błędzie:
+
+1. maszyna podmana;
+2. API podmana `tcp://<IP>:2375` (Testcontainers w bramkach);
+3. węzeł kind;
+4. kubeconfig i `.env` runnerów przepięte na bieżące IP;
+5. gotowość podów;
+6. tematy Kafki — gdy ich brak, `helm upgrade`, a hook je odtwarza;
+7. runnery `offline` według statusu na GitHubie — działających nie dubluje, także uruchomionych z okna admina;
+8. smoke: `shop-acceptance-tests` 3/3.
+
+Klaster trzyma stan między restartami, więc nic nie jest przebudowywane. Opcje: `-Deploy` (+ `-Full`) — wdróż od nowa; `-Compose` — stack docker-compose; `-SkipRunners`, `-SkipSmoke`. Uwaga: runner uruchomiony z okna admina po zmianie IP trzeba zrestartować ręcznie (skrypt to zgłosi) — nie widać jego procesu.
+
+Ręcznie, krok po kroku:
 
 ```powershell
 # 1) podman machine (Docker compatibility ON — wymagane przez Testcontainers)
